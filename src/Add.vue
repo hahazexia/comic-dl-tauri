@@ -9,6 +9,8 @@ import 'vue3-toastify/dist/index.css';
 
 const url = ref('');
 const type = ref('author');
+const authorProgress = ref('');
+const comicProgress = ref('');
 
 onMounted(() => {
   listen('err-msg', (e: any) => {
@@ -19,6 +21,12 @@ onMounted(() => {
     });
   });
 
+  listen('author-progress', (e: any) => {
+    authorProgress.value = e.payload;
+  });
+  listen('comic-progress', (e: any) => {
+    comicProgress.value = e.payload;
+  });
 });
 
 function urlChange(e: Event) {
@@ -62,6 +70,7 @@ async function confirm() {
           <option value="fanwai">fanwai</option>
         </select>
       </div>
+      <div class="center" v-text="`author: ${authorProgress} comic: ${comicProgress}`"></div>
       <div class="right">
         <div class="start" @click="confirm">confirm</div>
       </div>
@@ -98,6 +107,10 @@ async function confirm() {
       }
     }
 
+    .center {
+      flex: 1;
+      text-align: center;
+    }
 
     .right {
       .start {

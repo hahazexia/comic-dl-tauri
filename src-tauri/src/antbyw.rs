@@ -6,7 +6,7 @@ use futures::future::join_all;
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[allow(dead_code)]
@@ -76,12 +76,12 @@ pub struct JuanHuaFanwaiCount {
     all: usize,
 }
 
-pub async fn handle_html(url: String, dl_type: String, _app: &AppHandle) -> HandleHtmlRes {
+pub async fn handle_html(url: String, dl_type: String, app: &AppHandle) -> HandleHtmlRes {
     info!("handle_html invoke url: {}, dl_type: {}", &url, &dl_type);
 
     match dl_type.clone().as_str() {
         "juan" | "hua" | "fanwai" | "juan_hua_fanwai" => {
-            let res = handle_comic_html(url.clone()).await;
+            let res = handle_comic_html(url.clone(), app).await;
             res
         }
         "current" => {
@@ -89,7 +89,7 @@ pub async fn handle_html(url: String, dl_type: String, _app: &AppHandle) -> Hand
             res
         }
         "author" => {
-            let res = handle_author_html(url.clone()).await;
+            let res = handle_author_html(url.clone(), app).await;
             res
         }
         _ => HandleHtmlRes {
@@ -105,7 +105,7 @@ pub async fn handle_html(url: String, dl_type: String, _app: &AppHandle) -> Hand
     }
 }
 
-pub async fn handle_author_html(url: String) -> HandleHtmlRes {
+pub async fn handle_author_html(url: String, app: &AppHandle) -> HandleHtmlRes {
     // 获取作者页zz_name
     let zz_name = get_url_query(url.clone(), String::from("zz_name"));
 
@@ -228,16 +228,23 @@ pub async fn handle_author_html(url: String) -> HandleHtmlRes {
     info!("author json_data: {:?}", json_data);
 
     let mut new_json_data = json_data.clone();
+    let all_count = json_data.len();
+    let mut done_count: usize = 0;
     for (i, data) in json_data.iter().enumerate() {
         let mut temp = data.clone();
         if !data.done {
-            let comic_res = handle_comic_html(data.url.clone()).await;
+            let comic_res = handle_comic_html(data.url.clone(), app).await;
             if comic_res.done {
                 temp.local = comic_res.local;
                 temp.done = true;
                 new_json_data[i] = temp;
+                done_count += 1;
             }
+        } else {
+            done_count += 1;
         }
+        let progress = format!("{}/{}", done_count, all_count);
+        app.emit("author-progress", progress).unwrap();
     }
 
     let done: bool = new_json_data.iter().all(|x| x.done);
@@ -275,7 +282,7 @@ pub async fn handle_author_html(url: String) -> HandleHtmlRes {
     res
 }
 
-pub async fn handle_comic_html(url: String) -> HandleHtmlRes {
+pub async fn handle_comic_html(url: String, app: &AppHandle) -> HandleHtmlRes {
     // 获取漫画页面 kuid
     let kuid = get_url_query(url.clone(), String::from("kuid"));
     // 系统的用户目录
@@ -459,6 +466,9 @@ pub async fn handle_comic_html(url: String) -> HandleHtmlRes {
         all: juan_count + hua_count + fanwai_count,
     };
 
+    let all_count = all_type_count.all;
+    let mut done_count: usize = 0;
+
     for (key, value) in json_data.iter() {
         let task_count: usize = value.len();
         const GROUP_SIZE: usize = 5;
@@ -473,6 +483,14 @@ pub async fn handle_comic_html(url: String) -> HandleHtmlRes {
                 .iter()
                 .map(|current_url| handle_current_html(current_url.to_string().clone()));
             let results: Vec<HandleHtmlRes> = join_all(group_tasks).await;
+            results.iter().for_each(|x| {
+                if x.done {
+                    done_count += 1;
+                }
+            });
+
+            let progress = format!("{}/{}", done_count, all_count);
+            app.emit("comic-progress", progress).unwrap();
             concurrent_results.extend(results);
         }
 
