@@ -9,7 +9,6 @@ import 'vue3-toastify/dist/index.css';
 
 const url = ref('');
 const type = ref('author');
-const currentProgress = ref('');
 
 onMounted(() => {
   listen('err-msg', (e: any) => {
@@ -20,10 +19,6 @@ onMounted(() => {
     });
   });
 
-  listen('handle_html_progress', (e: any) => {
-    console.log(e, '看看');
-    currentProgress.value = e.payload;
-  });
 });
 
 function urlChange(e: Event) {
@@ -67,7 +62,6 @@ async function confirm() {
           <option value="fanwai">fanwai</option>
         </select>
       </div>
-      <div class="center" v-if="currentProgress" v-text="currentProgress"></div>
       <div class="right">
         <div class="start" @click="confirm">confirm</div>
       </div>
@@ -104,10 +98,6 @@ async function confirm() {
       }
     }
 
-    .center {
-      flex: 1;
-      text-align: center;
-    }
 
     .right {
       .start {

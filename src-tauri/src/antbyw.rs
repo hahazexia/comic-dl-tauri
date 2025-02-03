@@ -13,6 +13,7 @@ use tauri::AppHandle;
 pub struct HandleHtmlRes {
     code: StatusCode,
     data: DataWrapper,
+    local: String,
     msg: String,
     comic_name: String,
     current_name: String,
@@ -32,6 +33,7 @@ impl HandleHtmlRes {
         HandleHtmlRes {
             code: StatusCode::Failed,
             data: DataWrapper::HashMapData(HashMap::new()),
+            local: String::from(""),
             msg: String::from(""),
             comic_name: String::from(""),
             current_name: String::from(""),
@@ -44,7 +46,16 @@ impl HandleHtmlRes {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub enum DataWrapper {
     HashMapData(HashMap<String, Vec<CurrentElement>>),
+    VecAuthorData(Vec<AuthorElement>),
     VecData(Vec<String>),
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AuthorElement {
+    url: String,
+    comic_name: String,
+    local: String,
+    done: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -53,7 +64,7 @@ pub struct CurrentElement {
     name: String,
     href: String,
     imgs: Vec<String>,
-    count: u32,
+    count: usize,
     done: bool,
 }
 
@@ -77,25 +88,191 @@ pub async fn handle_html(url: String, dl_type: String, _app: &AppHandle) -> Hand
             let res = handle_current_html(url.clone()).await;
             res
         }
-        "author" => HandleHtmlRes {
-            code: StatusCode::Success,
-            msg: String::from(""),
-            data: DataWrapper::HashMapData(HashMap::new()),
-            comic_name: String::from(""),
-            current_name: String::from(""),
-            current_count: 0,
-            done: true,
-        },
+        "author" => {
+            let res = handle_author_html(url.clone()).await;
+            res
+        }
         _ => HandleHtmlRes {
             code: StatusCode::Failed,
             msg: String::from("no matched dl_type"),
             data: DataWrapper::HashMapData(HashMap::new()),
+            local: String::from(""),
             comic_name: String::from(""),
             current_name: String::from(""),
             current_count: 0,
             done: false,
         },
     }
+}
+
+pub async fn handle_author_html(url: String) -> HandleHtmlRes {
+    // 获取作者页zz_name
+    let zz_name = get_url_query(url.clone(), String::from("zz_name"));
+
+    let home_dir = home::home_dir().unwrap();
+    let author_html_cache_path = home_dir.join(format!(
+        ".comit_dl_tauri/html_cache/antbyw_author_{}.htmlcache",
+        &zz_name
+    ));
+    let author_json_cache_path = home_dir.join(format!(
+        ".comit_dl_tauri/json_cache/antbyw_author_{}.json",
+        &zz_name
+    ));
+
+    let mut json_data_from_read = Some(HandleHtmlRes::new());
+    // 如果已经存在author cache json 直接返回
+    if author_json_cache_path.exists() {
+        match read_from_json::<HandleHtmlRes>(author_json_cache_path.to_str().unwrap()) {
+            Ok(res) => {
+                json_data_from_read = Some(res.clone());
+                if res.done {
+                    return res;
+                } else {
+                    if let DataWrapper::VecAuthorData(author_eles) = res.data.clone() {
+                        let mut done_count: usize = 0;
+                        for data in author_eles.iter() {
+                            if data.done {
+                                done_count += 1;
+                            }
+                        }
+                        warn!(
+                            "author cache json imgs.len: {}, done_count: {}",
+                            author_eles.len(),
+                            done_count,
+                        );
+                    }
+                }
+            }
+            Err(_e) => {
+                warn!(
+                    "read author cache json failed! author_json_cache_path: {}",
+                    author_json_cache_path.to_str().unwrap()
+                );
+            }
+        };
+    }
+
+    // 先读缓存，如果没有再去下载漫画页html然后缓存到本地
+    let html_content;
+    if author_html_cache_path.exists() {
+        html_content = read_file_to_string(author_html_cache_path.to_str().unwrap()).unwrap();
+    } else {
+        // 请求漫画页面html
+        match retry_request(&url, 5).await {
+            Ok(s) => {
+                html_content = s;
+            }
+            Err(_) => {
+                return HandleHtmlRes {
+                    code: StatusCode::Failed,
+                    msg: String::from("download author html failed!"),
+                    data: DataWrapper::VecAuthorData(Vec::new()),
+                    local: String::from(""),
+                    comic_name: String::from(""),
+                    current_name: String::from(""),
+                    current_count: 0,
+                    done: false,
+                };
+            }
+        };
+
+        // 缓存漫画页面html
+        if let Err(e) = cache_html(&html_content, author_html_cache_path) {
+            error!(
+                "cache {} failed: {}",
+                format!("antbyw_author_{}.htmlcache", &zz_name),
+                e
+            );
+        }
+    }
+
+    let mut json_data: Vec<AuthorElement> = Vec::new();
+    if let Some(data) = json_data_from_read {
+        json_data = if let DataWrapper::VecAuthorData(temp_data) = data.data {
+            temp_data
+        } else {
+            Vec::new()
+        };
+    }
+
+    if json_data.is_empty() {
+        let document = scraper::Html::parse_document(&html_content);
+        let comic_selector = scraper::Selector::parse(".uk-card-media-top.uk-inline a").unwrap();
+        let comic_name_selector =
+            scraper::Selector::parse(".uk-card.uk-text-center .mt5.mb5.uk-text-truncate a")
+                .unwrap();
+        let comic_urls = document
+            .select(&comic_selector)
+            .map(|x| {
+                let mut comic_url = x.attr("href").unwrap().to_string();
+                comic_url.remove(0);
+                let complete_url = format!("https://www.antbyw.com{}", comic_url);
+                complete_url
+            })
+            .collect::<Vec<_>>();
+        let comic_names = document
+            .select(&comic_name_selector)
+            .map(|x| x.inner_html())
+            .collect::<Vec<_>>();
+
+        for (url, name) in comic_urls.iter().zip(comic_names.iter()) {
+            json_data.push(AuthorElement {
+                url: url.to_string(),
+                comic_name: name.to_string(),
+                local: String::from(""),
+                done: false,
+            });
+        }
+    }
+
+    info!("author json_data: {:?}", json_data);
+
+    let mut new_json_data = json_data.clone();
+    for (i, data) in json_data.iter().enumerate() {
+        let mut temp = data.clone();
+        if !data.done {
+            let comic_res = handle_comic_html(data.url.clone()).await;
+            if comic_res.done {
+                temp.local = comic_res.local;
+                temp.done = true;
+                new_json_data[i] = temp;
+            }
+        }
+    }
+
+    let done: bool = new_json_data.iter().all(|x| x.done);
+
+    let res = HandleHtmlRes {
+        code: StatusCode::Success,
+        msg: String::from(""),
+        data: DataWrapper::VecAuthorData(new_json_data),
+        local: String::from(""),
+        comic_name: String::from(""),
+        current_name: String::from(""),
+        current_count: 0,
+        done: done,
+    };
+
+    // 缓存author页json数据
+    if let Err(e) = save_to_json(&res, &author_json_cache_path.to_str().unwrap()) {
+        error!(
+            "cache author json {}: {} ",
+            format!("antbyw_author_{}.json", &zz_name),
+            e,
+        );
+        return HandleHtmlRes {
+            code: StatusCode::Failed,
+            msg: String::from("cache author json failed!"),
+            data: DataWrapper::VecAuthorData(Vec::new()),
+            local: String::from(""),
+            comic_name: String::from(""),
+            current_name: String::from(""),
+            current_count: 0,
+            done: false,
+        };
+    }
+
+    res
 }
 
 pub async fn handle_comic_html(url: String) -> HandleHtmlRes {
@@ -161,6 +338,7 @@ pub async fn handle_comic_html(url: String) -> HandleHtmlRes {
                     code: StatusCode::Failed,
                     msg: String::from("download comic html failed!"),
                     data: DataWrapper::HashMapData(HashMap::new()),
+                    local: String::from(""),
                     comic_name: String::from(""),
                     current_name: String::from(""),
                     current_count: 0,
@@ -258,11 +436,21 @@ pub async fn handle_comic_html(url: String) -> HandleHtmlRes {
         }
     }
 
+    info!("comic json_data: {:?}", json_data);
     // 并发获取comic（juan hua fanwai）中所有的 current页的图片
     let mut new_json_data: HashMap<String, Vec<CurrentElement>> = HashMap::new();
-    let juan_count = json_data.get("单行本").unwrap().len();
-    let hua_count = json_data.get("单话").unwrap().len();
-    let fanwai_count = json_data.get("番外篇").unwrap().len();
+    let juan_count = json_data
+        .get("单行本")
+        .unwrap_or(&Vec::new() as &Vec<CurrentElement>)
+        .len();
+    let hua_count = json_data
+        .get("单话")
+        .unwrap_or(&Vec::new() as &Vec<CurrentElement>)
+        .len();
+    let fanwai_count = json_data
+        .get("番外篇")
+        .unwrap_or(&Vec::new() as &Vec<CurrentElement>)
+        .len();
 
     let all_type_count = JuanHuaFanwaiCount {
         juan: juan_count,
@@ -297,7 +485,7 @@ pub async fn handle_comic_html(url: String) -> HandleHtmlRes {
                 if let DataWrapper::VecData(res_temp) = res.data.clone() {
                     temp.imgs = res_temp;
                 }
-                temp.count = concurrent_results.get(i).unwrap().current_count;
+                temp.count = concurrent_results.get(i).unwrap().current_count as usize;
                 temp.done = true;
             } else {
                 temp.imgs = Vec::new();
@@ -329,6 +517,7 @@ pub async fn handle_comic_html(url: String) -> HandleHtmlRes {
         code: StatusCode::Success,
         msg: String::from(""),
         data: DataWrapper::HashMapData(new_json_data),
+        local: comic_json_cache_path.to_str().unwrap().to_string(),
         comic_name: comic_name.clone(),
         current_name: String::from(""),
         current_count: 0,
@@ -345,6 +534,7 @@ pub async fn handle_comic_html(url: String) -> HandleHtmlRes {
             code: StatusCode::Failed,
             msg: String::from("cache comic json failed!"),
             data: DataWrapper::HashMapData(HashMap::new()),
+            local: String::from(""),
             comic_name: comic_name,
             current_name: String::from(""),
             current_count: 0,
@@ -411,6 +601,7 @@ pub async fn handle_current_html(url: String) -> HandleHtmlRes {
                     code: StatusCode::Failed,
                     msg: String::from("download current html failed!"),
                     data: DataWrapper::HashMapData(HashMap::new()),
+                    local: String::from(""),
                     comic_name: String::from(""),
                     current_name: String::from(""),
                     current_count: 0,
@@ -478,6 +669,7 @@ pub async fn handle_current_html(url: String) -> HandleHtmlRes {
         code: StatusCode::Success,
         msg: String::from(""),
         data: DataWrapper::VecData(href_vec.clone()),
+        local: current_json_cache_path.to_str().unwrap().to_string(),
         comic_name: comic_name.clone(),
         current_name: current_name.clone(),
         current_count: current_count.clone(),
@@ -495,6 +687,7 @@ pub async fn handle_current_html(url: String) -> HandleHtmlRes {
             code: StatusCode::Failed,
             msg: String::from("cache current json failed!"),
             data: DataWrapper::VecData(Vec::new()),
+            local: String::from(""),
             comic_name: comic_name,
             current_name: current_name,
             current_count: current_count,
