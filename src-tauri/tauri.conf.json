@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "comic-dl-tauri",
+        "title": "Comic-dl-tauri",
         "width": 800,
         "height": 600
       }

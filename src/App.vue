@@ -1,161 +1,230 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
-const greetMsg = ref("");
-const name = ref("");
-
-async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsg.value = await invoke("greet", { name: name.value });
-  await invoke("create_window");
+async function add() {
+  await invoke("add");
 }
+
+onMounted(() => {
+  const appWindow = getCurrentWindow();
+  document.querySelector('.menu')?.addEventListener('mousedown', (e: any) => {
+    if (e.buttons === 1) {
+      e.detail === 2
+        ? appWindow.toggleMaximize() // Maximize on double click
+        : appWindow.startDragging(); // Else start dragging
+    }
+  });
+});
 </script>
 
 <template>
-  <main class="container">
-    <h1>Welcome to Tauri + Vue 1</h1>
-
-    <div class="row">
-      <a href="https://vitejs.dev" target="_blank">
-        <img src="/vite.svg" class="logo vite" alt="Vite logo" />
-      </a>
-      <a href="https://tauri.app" target="_blank">
-        <img src="/tauri.svg" class="logo tauri" alt="Tauri logo" />
-      </a>
-      <a href="https://vuejs.org/" target="_blank">
-        <img src="./assets/vue.svg" class="logo vue" alt="Vue logo" />
-      </a>
+  <div class="main">
+    <div class="menu">
+      <div class="menu-option all active">All Tasks<span class="num" v-text="0"></span></div>
+      <div class="menu-option downloading">Downloading<span class="num" v-text="0"></span></div>
+      <div class="menu-option finished">Finished<span class="num" v-text="0"></span></div>
+      <div class="menu-option stopped">Stopped<span class="num" v-text="0"></span></div>
+      <div class="menu-option failed">Failed<span class="num" v-text="0"></span></div>
+      <div class="add" title="create new task" @click="add"></div>
     </div>
-    <p>Click on the Tauri, Vite, and Vue logos to learn more.</p>
-
-    <form class="row" @submit.prevent="greet">
-      <input id="greet-input" v-model="name" placeholder="Enter a name..." />
-      <button type="submit">Greet</button>
-    </form>
-    <p>{{ greetMsg }}</p>
-  </main>
+    <div class="list">
+      <div class="list-item">
+        <div class="name" v-text="'下载项目'" :title="'下载项目'"></div>
+        <div class="desc">
+          <div class="status downloading" v-text="'Downloading'"></div>
+          <div class="progress-num" v-text="'6.55%'"></div>
+          <div class="info" v-text="'额外信息'"></div>
+        </div>
+        <div class="progress">
+          <div class="progress-inner" :style="{
+            width: '6.55%',
+          }"></div>
+        </div>
+        <div class="tool-bar">
+          <div class="left"></div>
+          <div class="right">
+            <div class="pause"></div>
+            <div class="delete"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
-<style scoped>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
-
-.logo.vue:hover {
-  filter: drop-shadow(0 0 2em #249b73);
-}
-
-</style>
-<style>
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
+<style lang="scss" scoped>
+  .main {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    .menu {
+      position: relative;
+      width: 200px;
+      height: 100%;
+      background-color: #fff;
+      border-right: 1px solid #CECECE;
+      .add {
+        cursor: pointer;
+        background-image: url('./img/add.png');
+        background-repeat: no-repeat;
+        background-size: contain;
+        width: 20px;
+        height: 20px;
+        position: absolute;
+        left: 10px;
+        bottom: 10px;
+      }
+      .menu-option {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        position: relative;
+        cursor: pointer;
+        font-size: 16px;
+        color: #212121;
+        line-height: 50px;
+        padding-left: 40px;
+        padding-right: 10px;
+        &::before {
+          content: '';
+          display: block;
+          width: 20px;
+          height: 20px;
+          background-repeat: no-repeat;
+          background-size: contain;
+          position: absolute;
+          left: 10px;
+          top: 50%;
+          transform: translateY(-50%);
+        }
+        &.active {
+          background-color: #F5F5F5;
+        }
+        &:hover {
+          background-color: #F5F5F5;
+        }
+        .num {
+          font-size: 12px;
+          color: #5D5D5D;
+        }
+      }
+      .all::before {
+        background-image: url('./img/all.png');
+      }
+      .downloading::before {
+        background-image: url('./img/download.png');
+      }
+      .finished::before {
+        background-image: url('./img/ok.png');
+      }
+      .stopped::before {
+        background-image: url('./img/stop.png');
+      }
+      .failed::before {
+        background-image: url('./img/failed.png');
+      }
+    }
+    .list {
+      max-height: 100%;
+      overflow-y: auto;
+      flex: 1;
+      .list-item {
+        cursor: pointer;
+        padding: 20px 10px;
+        &:hover {
+          background-color: #F5F5F5;
+        }
+        .name {
+          font-size: 16px;
+          font-weight: bold;
+          display: -webkit-box;
+          -webkit-box-orient: vertical;
+          -webkit-line-clamp: 2;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          word-break: break-all;
+        }
+        .desc {
+          margin-top: 5px;
+          display: flex;
+          justify-content: flex-start;
+          .status {
+            padding-left: 20px;
+            position: relative;
+            &::before {
+              content: '';
+              display: block;
+              width: 12px;
+              height: 12px;
+              background-repeat: no-repeat;
+              background-size: contain;
+              position: absolute;
+              left: 0;
+              top: 50%;
+              transform: translateY(-50%);
+            }
+          }
+          .downloading::before {
+            background-image: url('./img/download.png');
+          }
+          .finished::before {
+            background-image: url('./img/ok.png');
+          }
+          .stopped::before {
+            background-image: url('./img/stop.png');
+          }
+          .failed::before {
+            background-image: url('./img/failed.png');
+          }
+          .status, .progress-num, .info {
+            font-size: 12px;
+          }
+          .progress-num {
+            margin-left: 5px;
+            color: #4872ac;
+          }
+          .info {
+            margin-left: 30px;
+          }
+        }
+        .progress {
+          width: 95%;
+          height: 3px;
+          background-color: #E6E6E6;
+          margin: 5px 0;
+          .progress-inner {
+            height: 3px;
+            max-width: 100%;
+            background-color: #4872ac;
+          }
+        }
+        .tool-bar {
+          display: flex;
+          justify-content: space-between;
+          align-content: center;
+          padding-right: 5%;
+          .right {
+            display: flex;
+            justify-content: flex-end;
+            align-content: center;
+            .pause, .delete {
+              background-repeat: no-repeat;
+              background-size: contain;
+              width: 20px;
+              height: 20px;
+              cursor: pointer;
+            }
+            .pause {
+              background-image: url('./img/pause.png');
+            }
+            .delete {
+              background-image: url('./img/delete.png');
+            }
+          }
+        }
+      }
+    }
   }
-
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
-
 </style>
