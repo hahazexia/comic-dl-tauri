@@ -21,7 +21,7 @@ pub enum StatusCode {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct ErrorMsg {
-    msg: String,
+    pub(crate) msg: String,
 }
 
 #[warn(dead_code)]

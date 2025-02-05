@@ -11,14 +11,15 @@ use tauri::{AppHandle, Emitter};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[allow(dead_code)]
 pub struct HandleHtmlRes {
-    code: StatusCode,
-    data: DataWrapper,
-    local: String,
-    msg: String,
-    comic_name: String,
-    current_name: String,
-    current_count: u32,
-    done: bool,
+    pub(crate) code: StatusCode,
+    pub(crate) data: DataWrapper,
+    pub(crate) local: String,
+    pub(crate) msg: String,
+    pub(crate) author: String,
+    pub(crate) comic_name: String,
+    pub(crate) current_name: String,
+    pub(crate) current_count: u32,
+    pub(crate) done: bool,
 }
 
 #[allow(dead_code)]
@@ -35,6 +36,7 @@ impl HandleHtmlRes {
             data: DataWrapper::HashMapData(HashMap::new()),
             local: String::from(""),
             msg: String::from(""),
+            author: String::from(""),
             comic_name: String::from(""),
             current_name: String::from(""),
             current_count: 0,
@@ -47,24 +49,31 @@ impl HandleHtmlRes {
 pub enum DataWrapper {
     HashMapData(HashMap<String, Vec<CurrentElement>>),
     VecAuthorData(Vec<AuthorElement>),
-    VecData(Vec<String>),
+    VecData(Vec<Img>),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuthorElement {
-    url: String,
-    comic_name: String,
-    local: String,
-    done: bool,
+    pub url: String,
+    pub comic_name: String,
+    pub local: String,
+    pub done: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[allow(dead_code)]
 pub struct CurrentElement {
-    name: String,
+    pub name: String,
+    pub href: String,
+    pub imgs: Vec<Img>,
+    pub count: usize,
+    pub done: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[allow(dead_code)]
+pub struct Img {
     href: String,
-    imgs: Vec<String>,
-    count: usize,
     done: bool,
 }
 
@@ -94,9 +103,10 @@ pub async fn handle_html(url: String, dl_type: String, app: &AppHandle) -> Handl
         }
         _ => HandleHtmlRes {
             code: StatusCode::Failed,
-            msg: String::from("no matched dl_type"),
             data: DataWrapper::HashMapData(HashMap::new()),
             local: String::from(""),
+            msg: String::from("no matched dl_type"),
+            author: String::from(""),
             comic_name: String::from(""),
             current_name: String::from(""),
             current_count: 0,
@@ -168,6 +178,7 @@ pub async fn handle_author_html(url: String, app: &AppHandle) -> HandleHtmlRes {
                     msg: String::from("download author html failed!"),
                     data: DataWrapper::VecAuthorData(Vec::new()),
                     local: String::from(""),
+                    author: String::from(""),
                     comic_name: String::from(""),
                     current_name: String::from(""),
                     current_count: 0,
@@ -254,6 +265,7 @@ pub async fn handle_author_html(url: String, app: &AppHandle) -> HandleHtmlRes {
         msg: String::from(""),
         data: DataWrapper::VecAuthorData(new_json_data),
         local: String::from(""),
+        author: zz_name.clone(),
         comic_name: String::from(""),
         current_name: String::from(""),
         current_count: 0,
@@ -272,6 +284,7 @@ pub async fn handle_author_html(url: String, app: &AppHandle) -> HandleHtmlRes {
             msg: String::from("cache author json failed!"),
             data: DataWrapper::VecAuthorData(Vec::new()),
             local: String::from(""),
+            author: String::from(""),
             comic_name: String::from(""),
             current_name: String::from(""),
             current_count: 0,
@@ -346,6 +359,7 @@ pub async fn handle_comic_html(url: String, app: &AppHandle) -> HandleHtmlRes {
                     msg: String::from("download comic html failed!"),
                     data: DataWrapper::HashMapData(HashMap::new()),
                     local: String::from(""),
+                    author: String::from(""),
                     comic_name: String::from(""),
                     current_name: String::from(""),
                     current_count: 0,
@@ -368,6 +382,7 @@ pub async fn handle_comic_html(url: String, app: &AppHandle) -> HandleHtmlRes {
     let mut content_vec = Vec::new();
     let mut json_data: HashMap<String, Vec<CurrentElement>> = HashMap::new();
     let mut comic_name: String = String::from("");
+    let mut author: String = String::from("");
 
     if let Some(data) = json_data_from_read {
         json_data = if let DataWrapper::HashMapData(temp_data) = data.data {
@@ -389,6 +404,10 @@ pub async fn handle_comic_html(url: String, app: &AppHandle) -> HandleHtmlRes {
             .unwrap()
             .to_owned()
             .inner_html();
+        // 获取第一个作者名
+        let author_selector = scraper::Selector::parse(".uk-label.uk-label-border.mbn").unwrap();
+        let author_temp: Vec<_> = document.select(&author_selector).to_owned().collect();
+        author = author_temp.first().unwrap().inner_html();
 
         // 获取三个 title 单行本 单话 番外篇
         let juan_hua_fanwai_title_selector =
@@ -536,6 +555,7 @@ pub async fn handle_comic_html(url: String, app: &AppHandle) -> HandleHtmlRes {
         msg: String::from(""),
         data: DataWrapper::HashMapData(new_json_data),
         local: comic_json_cache_path.to_str().unwrap().to_string(),
+        author: author,
         comic_name: comic_name.clone(),
         current_name: String::from(""),
         current_count: 0,
@@ -553,6 +573,7 @@ pub async fn handle_comic_html(url: String, app: &AppHandle) -> HandleHtmlRes {
             msg: String::from("cache comic json failed!"),
             data: DataWrapper::HashMapData(HashMap::new()),
             local: String::from(""),
+            author: String::from(""),
             comic_name: comic_name,
             current_name: String::from(""),
             current_count: 0,
@@ -620,6 +641,7 @@ pub async fn handle_current_html(url: String) -> HandleHtmlRes {
                     msg: String::from("download current html failed!"),
                     data: DataWrapper::HashMapData(HashMap::new()),
                     local: String::from(""),
+                    author: String::from(""),
                     comic_name: String::from(""),
                     current_name: String::from(""),
                     current_count: 0,
@@ -640,7 +662,7 @@ pub async fn handle_current_html(url: String) -> HandleHtmlRes {
 
     let comic_name;
     let current_name;
-    let mut href_vec = Vec::new();
+    let mut href_vec: Vec<Img> = Vec::new();
     let current_count;
 
     {
@@ -674,7 +696,10 @@ pub async fn handle_current_html(url: String) -> HandleHtmlRes {
 
         for ele in imgs {
             let href = ele.attr("data-src").unwrap().to_owned();
-            href_vec.push(href.to_string());
+            href_vec.push(Img {
+                href: href.to_string(),
+                done: false,
+            });
         }
     }
 
@@ -688,6 +713,7 @@ pub async fn handle_current_html(url: String) -> HandleHtmlRes {
         msg: String::from(""),
         data: DataWrapper::VecData(href_vec.clone()),
         local: current_json_cache_path.to_str().unwrap().to_string(),
+        author: String::from(""),
         comic_name: comic_name.clone(),
         current_name: current_name.clone(),
         current_count: current_count.clone(),
@@ -706,6 +732,7 @@ pub async fn handle_current_html(url: String) -> HandleHtmlRes {
             msg: String::from("cache current json failed!"),
             data: DataWrapper::VecData(Vec::new()),
             local: String::from(""),
+            author: String::from(""),
             comic_name: comic_name,
             current_name: current_name,
             current_count: current_count,

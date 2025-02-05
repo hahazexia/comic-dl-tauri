@@ -2,7 +2,7 @@
 import { ref, onMounted } from "vue";
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from '@tauri-apps/api/window';
+// import { getCurrentWindow } from '@tauri-apps/api/window';
 import { toast } from 'vue3-toastify';
 import 'vue3-toastify/dist/index.css';
 
@@ -13,7 +13,7 @@ const authorProgress = ref('');
 const comicProgress = ref('');
 
 onMounted(() => {
-  listen('err-msg', (e: any) => {
+  listen('err-msg-add', (e: any) => {
     toast(`${e.payload}`, {
       position: toast.POSITION.TOP_CENTER,
       type: 'error',
@@ -31,7 +31,17 @@ onMounted(() => {
 
 function urlChange(e: Event) {
   const target = e.target as HTMLTextAreaElement;
-  url.value = target.value;
+  let temp_url = target.value.trim();
+  url.value = temp_url;
+  let url_query: any = parseUrlParams(temp_url);
+
+  if (url_query.zjid) {
+    type.value = 'current';
+  } else if (url_query.kuid) {
+    type.value = 'juan_hua_fanwai';
+  } else if (url_query.zz_name) {
+    type.value = 'author';
+  }
 }
 
 function typeChange(e: Event) {
@@ -52,6 +62,18 @@ async function confirm() {
       autoClose: 2000,
     });
   }
+}
+
+function parseUrlParams(url: string) {
+  const params: any = {};
+  const urlObj = new URL(url);
+  const searchParams = new URLSearchParams(urlObj.search);
+
+  for (const [key, value] of searchParams.entries()) {
+    params[key] = value;
+  }
+
+  return params;
 }
 
 </script>
@@ -108,6 +130,7 @@ async function confirm() {
     }
 
     .center {
+      font-size: 12px;
       flex: 1;
       text-align: center;
     }
