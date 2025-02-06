@@ -255,7 +255,7 @@ pub async fn handle_author_html(url: String, app: &AppHandle) -> HandleHtmlRes {
             done_count += 1;
         }
         let progress = format!("{}/{}", done_count, all_count);
-        app.emit("author-progress", progress).unwrap();
+        app.emit("author_progress", progress).unwrap();
     }
 
     let done: bool = new_json_data.iter().all(|x| x.done);
@@ -509,7 +509,7 @@ pub async fn handle_comic_html(url: String, app: &AppHandle) -> HandleHtmlRes {
             });
 
             let progress = format!("{}/{}", done_count, all_count);
-            app.emit("comic-progress", progress).unwrap();
+            app.emit("comic_progress", progress).unwrap();
             concurrent_results.extend(results);
         }
 

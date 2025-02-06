@@ -10,15 +10,15 @@ mod utils;
 
 use antbyw::{handle_html, CurrentElement, DataWrapper, HandleHtmlRes};
 use db::{
-    create_download_task, create_table, find_tasks_by_dl_type_and_url, get_all_download_tasks,
-    init_db,
+    create_download_task, create_table, delete_download_task, find_tasks_by_dl_type_and_url,
+    get_all_download_tasks, init_db,
 };
 use log::{error, info};
 use log_init::init_log;
 use mangadex::handle_mangadex;
 use models::PartialDownloadTask;
 use std::sync::RwLock;
-use tauri::{AppHandle, Emitter};
+use tauri::{App, AppHandle, Emitter, Manager};
 use utils::{create_cache_dir, get_second_level_domain, read_from_json, StatusCode};
 
 pub static TASKS: RwLock<Vec<PartialDownloadTask>> = RwLock::new(Vec::new());
@@ -30,24 +30,24 @@ pub fn run() {
             // 初始化日志
             if let Err(e) = init_log() {
                 error!("init log error: {}", e);
-                app.emit("err-msg-main", format!("init log failed!"))
+                app.emit("err_msg_main", format!("init log failed!"))
                     .unwrap();
             };
             // 创建缓存目录
             if let Err(e) = create_cache_dir() {
                 error!("create cache dir failed: {}", e.to_string());
-                app.emit("err-msg-main", format!("create cache dir failed!"))
+                app.emit("err_msg_main", format!("create cache dir failed!"))
                     .unwrap();
             };
             // 初始化数据库
             if let Err(e) = init_db() {
                 error!("{}", e.to_string());
-                app.emit("err-msg-main", e.to_string()).unwrap();
+                app.emit("err_msg_main", e.to_string()).unwrap();
             } else {
                 // 创建表
                 if let Err(e) = create_table() {
                     error!("create_table failed: {}", e.to_string());
-                    app.emit("err-msg-main", e.to_string()).unwrap();
+                    app.emit("err_msg_main", e.to_string()).unwrap();
                 } else {
                     // 获取任务列表存入全局变量 TASKS
                     let db_res = get_all_download_tasks();
@@ -69,7 +69,12 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_tasks, add, add_new_task])
+        .invoke_handler(tauri::generate_handler![
+            get_tasks,
+            add,
+            add_new_task,
+            delete_tasks,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -79,6 +84,22 @@ fn get_tasks(_app: AppHandle) -> Vec<PartialDownloadTask> {
     info!("get_tasks");
     let tasks = TASKS.read().unwrap().clone();
     tasks
+}
+#[tauri::command]
+fn delete_tasks(_app: AppHandle, id: i32) -> isize {
+    let del_res = delete_download_task(id);
+    match del_res {
+        Ok(res) => {
+            let mut tasks = TASKS.write().unwrap();
+            tasks.retain(|x| x.id != id);
+            info!("delete task: {}", res);
+            res as isize
+        }
+        Err(e) => {
+            error!("delete task failed: {} e: {}", id, e);
+            -1
+        }
+    }
 }
 
 // WindowConfig https://docs.rs/tauri-utils/latest/tauri_utils/config/struct.WindowConfig.html
@@ -149,7 +170,7 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
         || (!url.starts_with("https://www.antbyw.com/")
             && !url.starts_with("https://mangadex.org/"))
     {
-        app.emit("err-msg-add", format!("url is invalid!")).unwrap();
+        app.emit("err_msg_add", format!("url is invalid!")).unwrap();
     } else {
         let site_name_temp = get_second_level_domain(&url);
         if let Some(site_name) = site_name_temp {
@@ -216,7 +237,7 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
 
                                                 tasks.push(temp_task.clone());
                                                 let tasks_to_log = (*tasks).clone();
-                                                app.emit("new-task", &temp_task).unwrap();
+                                                app.emit("new_task", &temp_task).unwrap();
                                                 info!(
                                                     "current tasks:  {}",
                                                     serde_json::to_string_pretty(&tasks_to_log)
@@ -229,7 +250,7 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                                                     e.to_string()
                                                 );
                                                 app.emit(
-                                                    "err-msg-main",
+                                                    "err_msg_main",
                                                     "insert current task failed!",
                                                 )
                                                 .unwrap();
@@ -237,7 +258,7 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                                         }
                                     }
                                 } else {
-                                    app.emit("err-msg-add", "handle current html failed!")
+                                    app.emit("err_msg_add", "handle current html failed!")
                                         .unwrap();
                                 }
                             }
@@ -259,7 +280,7 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                                         }
                                     }
                                 } else {
-                                    app.emit("err-msg-add", "handle juan_hua_fanwai html failed!")
+                                    app.emit("err_msg_add", "handle juan_hua_fanwai html failed!")
                                         .unwrap();
                                 }
                             }
@@ -281,7 +302,7 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                                         }
                                     }
                                 } else {
-                                    app.emit("err-msg-add", "handle juan_hua_fanwai html failed!")
+                                    app.emit("err_msg_add", "handle juan_hua_fanwai html failed!")
                                         .unwrap();
                                 }
                             }
@@ -303,7 +324,7 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                                         }
                                     }
                                 } else {
-                                    app.emit("err-msg-add", "handle juan_hua_fanwai html failed!")
+                                    app.emit("err_msg_add", "handle juan_hua_fanwai html failed!")
                                         .unwrap();
                                 }
                             }
@@ -323,7 +344,7 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                                         }
                                     }
                                 } else {
-                                    app.emit("err-msg-add", "handle juan_hua_fanwai html failed!")
+                                    app.emit("err_msg_add", "handle juan_hua_fanwai html failed!")
                                         .unwrap();
                                 }
                             }
@@ -352,24 +373,26 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                                         }
                                     }
                                 } else {
-                                    app.emit("err-msg-add", "handle author html failed!")
+                                    app.emit("err_msg_add", "handle author html failed!")
                                         .unwrap();
                                 }
                             }
                             _ => {}
                         }
                     }
+                    let add_window = app.get_webview_window("add").unwrap();
+                    add_window.close();
                 }
                 "mangadex" => {
                     let _ = handle_mangadex(url.clone()).await;
                 }
                 _ => {
-                    app.emit("err-msg-add", "unknown manga site, not support")
+                    app.emit("err_msg_add", "unknown manga site, not support")
                         .unwrap();
                 }
             }
         } else {
-            app.emit("err-msg-add", "unknown manga site, not support")
+            app.emit("err_msg_add", "unknown manga site, not support")
                 .unwrap();
         }
     }
@@ -382,67 +405,89 @@ pub fn add_new_task_juan_hua_fanwai(
     app: &AppHandle,
     url: String,
 ) {
-    let new_value = value
-        .clone()
-        .iter()
-        .map(|x| {
-            let temp = CurrentElement {
-                name: x.name.clone(),
-                href: x.href.clone(),
-                imgs: x.imgs.clone(),
-                count: x.count,
-                done: false,
-            };
-            temp
-        })
-        .collect::<Vec<_>>();
-    let data_json = serde_json::to_string_pretty(&new_value).unwrap();
     let dl_type_divide = match key.as_str() {
         "单行本" => "juan",
         "单话" => "hua",
         "番外篇" => "fanwai",
         _ => "",
     };
-    info!("dl_type_divide: {}", dl_type_divide);
-    let db_res = create_download_task(
-        dl_type_divide,
-        "stopped",
-        &res.local,
-        &data_json,
-        &url,
-        &res.author,
-        &res.comic_name,
-        "0.00%",
-        false,
-    );
-    match db_res {
-        Ok(task) => {
-            let mut tasks = TASKS.write().unwrap();
-            let temp_task = PartialDownloadTask {
-                id: task.id,
-                dl_type: task.dl_type,
-                status: task.status,
-                local_path: task.local_path,
-                url: task.url,
-                author: task.author,
-                comic_name: task.comic_name,
-                progress: task.progress,
-                done: task.done,
-            };
-
-            app.emit("new-task", &temp_task).unwrap();
-            tasks.push(temp_task.clone());
-            let tasks_to_log = (*tasks).clone();
-            info!(
-                "{} tasks:  {}",
-                dl_type_divide,
-                serde_json::to_string_pretty(&tasks_to_log).unwrap()
-            );
+    let db_task_res = find_tasks_by_dl_type_and_url(dl_type_divide, &url);
+    let mut no_find = true;
+    match db_task_res {
+        Ok(data) => {
+            if data.is_empty() {
+                no_find = true;
+            } else {
+                no_find = false;
+                info!("already has this task!");
+                app.emit_to("main", "info_msg_main", "already has this task!")
+                    .unwrap();
+                app.emit_to("main", "info_msg_add", "already has this task!")
+                    .unwrap();
+            }
         }
-        Err(e) => {
-            error!("insert juan task failed: {}", e.to_string());
-            app.emit("err-msg-main", "insert juan task failed!")
-                .unwrap();
+        Err(_e) => {
+            no_find = true;
+            error!("find_tasks_by_dl_type_and_url failed: {}", _e.to_string());
+        }
+    }
+    if no_find {
+        let new_value = value
+            .clone()
+            .iter()
+            .map(|x| {
+                let temp = CurrentElement {
+                    name: x.name.clone(),
+                    href: x.href.clone(),
+                    imgs: x.imgs.clone(),
+                    count: x.count,
+                    done: false,
+                };
+                temp
+            })
+            .collect::<Vec<_>>();
+        let data_json = serde_json::to_string_pretty(&new_value).unwrap();
+        info!("dl_type_divide: {}", dl_type_divide);
+        let db_res = create_download_task(
+            dl_type_divide,
+            "stopped",
+            &res.local,
+            &data_json,
+            &url,
+            &res.author,
+            &res.comic_name,
+            "0.00%",
+            false,
+        );
+        match db_res {
+            Ok(task) => {
+                let mut tasks = TASKS.write().unwrap();
+                let temp_task = PartialDownloadTask {
+                    id: task.id,
+                    dl_type: task.dl_type,
+                    status: task.status,
+                    local_path: task.local_path,
+                    url: task.url,
+                    author: task.author,
+                    comic_name: task.comic_name,
+                    progress: task.progress,
+                    done: task.done,
+                };
+
+                app.emit("new_task", &temp_task).unwrap();
+                tasks.push(temp_task.clone());
+                let tasks_to_log = (*tasks).clone();
+                info!(
+                    "{} tasks:  {}",
+                    dl_type_divide,
+                    serde_json::to_string_pretty(&tasks_to_log).unwrap()
+                );
+            }
+            Err(e) => {
+                error!("insert juan task failed: {}", e.to_string());
+                app.emit("err_msg_main", "insert juan task failed!")
+                    .unwrap();
+            }
         }
     }
 }

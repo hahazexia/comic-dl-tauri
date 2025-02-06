@@ -136,7 +136,13 @@ pub fn delete_download_task(task_id: i32) -> QueryResult<usize> {
     use crate::schema::download_tasks::dsl::*;
     let mut conn = DB_CONNECTION.get().unwrap().lock().unwrap();
 
-    diesel::delete(download_tasks.find(task_id)).execute(&mut *conn)
+    let row_id = diesel::delete(download_tasks.find(task_id))
+        .returning(id)
+        .get_result::<i32>(&mut *conn)?;
+
+    info!("delete_download_task row_id: {}", row_id);
+
+    Ok(row_id as usize)
 }
 
 // 查询下载任务

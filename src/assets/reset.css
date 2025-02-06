@@ -29,10 +29,14 @@ html {
 }
 
 * {
-  user-select: none; /* 对大多数现代浏览器有效 */
-  -webkit-user-select: none; /* 对 Safari 有效 */
-  -moz-user-select: none; /* 对 Firefox 有效 */
-  -ms-user-select: none; /* 对 IE 和 Edge 有效 */
+  user-select: none;
+  /* 对大多数现代浏览器有效 */
+  -webkit-user-select: none;
+  /* 对 Safari 有效 */
+  -moz-user-select: none;
+  /* 对 Firefox 有效 */
+  -ms-user-select: none;
+  /* 对 IE 和 Edge 有效 */
   padding: 0;
   /* Reset `padding` and `margin` of all elements */
   margin: 0;
@@ -337,6 +341,7 @@ body,
 .pixelcode {
   font-family: 'pixelcode';
 }
+
 .fusion {
   font-family: 'fusion';
 }
@@ -357,4 +362,20 @@ body,
 
 div {
   font-family: 'pixelcode', 'fusion';
+}
+
+:root {
+  --toastify-toast-width: 300px;
+  --toastify-toast-background: #fff;
+  --toastify-toast-min-height: 20px;
+  --toastify-toast-max-height: 400px;
+
+  .Toastify__toast {
+    font-size: 12px;
+  }
+
+  .Toastify__toast-body {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
 }

@@ -13,7 +13,7 @@ const authorProgress = ref('');
 const comicProgress = ref('');
 
 onMounted(() => {
-  listen('err-msg-add', (e: any) => {
+  listen('err_msg_add', (e: any) => {
     toast(`${e.payload}`, {
       position: toast.POSITION.TOP_CENTER,
       type: 'error',
@@ -21,10 +21,10 @@ onMounted(() => {
     });
   });
 
-  listen('author-progress', (e: any) => {
+  listen('author_progress', (e: any) => {
     authorProgress.value = e.payload;
   });
-  listen('comic-progress', (e: any) => {
+  listen('comic_progress', (e: any) => {
     comicProgress.value = e.payload;
   });
 });

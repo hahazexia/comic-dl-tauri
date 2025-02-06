@@ -21,6 +21,18 @@ interface Tasks {
 const tasks_current = reactive<Tasks[]>([]);
 const tasks_all = reactive<Tasks[]>([]);
 const active_menu = ref('all');
+const del_task = ref<Tasks>({
+  id: 0,
+  dl_type: "",
+  status: "",
+  local_path: "",
+  url: "",
+  author: "",
+  comic_name: "",
+  progress: "",
+  done: false
+});
+const isModalOpen = ref(false);
 
 const task_downloading = computed(() => {
   return tasks_all.filter(task => task.status === 'downloading');
@@ -42,8 +54,13 @@ async function add() {
 function switchMenu(menu: string) {
   if (active_menu.value === menu) return;
   active_menu.value = menu;
+  calc_tasks_current(menu);
+}
+
+function calc_tasks_current(menu?: any) {
   tasks_current.splice(0);
-  switch (menu) {
+  let temp_menu = menu || active_menu.value;
+  switch (temp_menu) {
     case 'all':
       tasks_current.push(...tasks_all);
       break;
@@ -62,8 +79,33 @@ function switchMenu(menu: string) {
   }
 }
 
+function deleteTask(data: any) {
+  del_task.value = data;
+  openModal();
+}
+
+const openModal = () => {
+  isModalOpen.value = true;
+};
+
+const closeModal = () => {
+  isModalOpen.value = false;
+};
+
+const confirmDelete = async () => {
+  let del_id = await invoke("delete_tasks", { id: del_task.value?.id });
+  const index = tasks_all.findIndex(item => item.id === del_id);
+  const index2 = tasks_current.findIndex(item => item.id === del_id);
+  if (index !== -1) {
+    tasks_all.splice(index, 1);
+    tasks_current.splice(index2, 1);
+  }
+
+  isModalOpen.value = false;
+};
+
 onMounted(() => {
-  listen('err-msg-main', (e: any) => {
+  listen('err_msg_main', (e: any) => {
     toast(`${e.payload}`, {
       position: toast.POSITION.TOP_CENTER,
       type: 'error',
@@ -71,7 +113,7 @@ onMounted(() => {
     });
   });
 
-  listen('info-msg-main', (e: any) => {
+  listen('info_msg_main', (e: any) => {
     toast(`${e.payload}`, {
       position: toast.POSITION.TOP_CENTER,
       type: 'info',
@@ -79,8 +121,9 @@ onMounted(() => {
     });
   });
 
-  listen('new-task', (e: any) => {
+  listen('new_task', (e: any) => {
     tasks_all.push(e.payload);
+    calc_tasks_current();
   });
 
   const appWindow = getCurrentWindow();
@@ -123,8 +166,10 @@ onMounted(() => {
         <div class="desc">
           <div class="status" :class="data.status" v-text="data.status"></div>
           <div class="progress-num" v-text="data.progress"></div>
-          <div class="info" v-text="`author: ${data.author}`"></div>
-          <div class="info" v-text="`dl_type: ${data.dl_type}`"></div>
+
+          <div class="info" v-text="`id:${data.id}`"></div>
+          <div class="info" v-text="`author:${data.author}`"></div>
+          <div class="info" v-text="`dl_type:${data.dl_type}`"></div>
         </div>
         <div class="progress">
           <div class="progress-inner" :style="{
@@ -135,11 +180,19 @@ onMounted(() => {
           <div class="left"></div>
           <div class="right">
             <div class="pause"></div>
-            <div class="delete"></div>
+            <div class="delete" @click="() => deleteTask(data)"></div>
           </div>
         </div>
       </div>
     </div>
+    <dialog class="delete-dialog" :open="isModalOpen" @close="isModalOpen = false">
+      <div class="delete-title" v-text="`Confirm delete this task?`"></div>
+      <p class="delete-item" v-text="`${del_task?.comic_name} ${del_task?.dl_type}`"></p>
+      <div class="delete-operation">
+        <button class="delete-btn" @click="confirmDelete">confirm</button>
+        <button class="delete-btn" @click="closeModal">cancel</button>
+      </div>
+    </dialog>
   </div>
 </template>
 
@@ -347,6 +400,41 @@ onMounted(() => {
           .delete {
             background-image: url('./img/delete.png');
           }
+        }
+      }
+    }
+  }
+
+  .delete-dialog {
+    width: 280px;
+    position: absolute;
+    left: calc(100% - 300px);
+    bottom: 20px;
+    // top: 50%;
+    // transform: translateY(-50%);
+    box-shadow: 10px 10px 5px rgba($color: #575757, $alpha: 0.3);
+    border: 1px solid rgba($color: #7f7f7f, $alpha: 0.3);
+
+    .delete-title {
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .delete-item {
+      font-size: 12px;
+      font-weight: bold;
+      color: rgb(140, 65, 88);
+    }
+
+    .delete-operation {
+      display: flex;
+      justify-content: space-between;
+
+      .delete-btn {
+        font-size: 12px;
+
+        &:hover {
+          color: #4872ac;
         }
       }
     }
