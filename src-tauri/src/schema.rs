@@ -9,6 +9,9 @@ diesel::table! {
       author -> Text,
       comic_name -> Text,
       progress -> Text,
+      count -> Integer,
+      now_count -> Integer,
+      error_vec -> Text,
       done -> Bool,
   }
 }

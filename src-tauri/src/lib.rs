@@ -8,20 +8,48 @@ pub mod models;
 pub mod schema;
 mod utils;
 
-use antbyw::{handle_html, CurrentElement, DataWrapper, HandleHtmlRes};
+use antbyw::{handle_html, CurrentElement, DataWrapper, HandleHtmlRes, Img};
+use bytes::Bytes;
 use db::{
     create_download_task, create_table, delete_download_task, find_tasks_by_dl_type_and_url,
-    get_all_download_tasks, init_db,
+    get_all_download_tasks, get_download_task, init_db, update_download_task_error_vec,
+    update_download_task_progress, update_download_task_status,
 };
+use image::{load_from_memory, ImageFormat};
 use log::{error, info};
 use log_init::init_log;
 use mangadex::handle_mangadex;
-use models::PartialDownloadTask;
-use std::sync::RwLock;
-use tauri::{App, AppHandle, Emitter, Manager};
+use models::{DownloadTask, PartialDownloadTask};
+use reqwest;
+use serde::Serialize;
+use std::fs::{self, File};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::{collections::HashMap, sync::RwLock};
+use tauri::{ipc::Channel, AppHandle, Emitter, Manager};
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
+use tokio::time::{timeout, Duration};
 use utils::{create_cache_dir, get_second_level_domain, read_from_json, StatusCode};
 
 pub static TASKS: RwLock<Vec<PartialDownloadTask>> = RwLock::new(Vec::new());
+
+#[derive(Debug, Clone)]
+pub struct DownloadResult {
+    group_index: usize,
+    index: usize,
+    error_msg: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DownloadEvent {
+    id: i32,
+    progress: String,
+    count: i32,
+    now_count: i32,
+    error_vec: String,
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -74,9 +102,384 @@ pub fn run() {
             add,
             add_new_task,
             delete_tasks,
+            start_or_pause,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+async fn download_single_image(
+    id: i32,
+    group_index: usize,
+    index: usize,
+    url: String,
+    save_path: String,
+    semaphore: Arc<Semaphore>,
+    progress: Arc<Mutex<u32>>,
+) -> DownloadResult {
+    let _permit = match semaphore.acquire().await {
+        Ok(permit) => permit,
+        Err(_) => {
+            let error_msg = format!(
+                "Failed to acquire semaphore for group {} index {}",
+                group_index, index
+            );
+            return DownloadResult {
+                group_index,
+                index,
+                error_msg,
+            };
+        }
+    };
+    let mut count = 0;
+    let messages = vec!["请求失败，状态码", "请求错误", "请求超时", "字节转换失败"];
+    let mut err_counts = std::collections::HashMap::new();
+    let mut res;
+
+    loop {
+        let current_status = {
+            let tasks = TASKS.read().unwrap();
+            let target = tasks.iter().find(|x| x.id == id).unwrap();
+            target.status.clone()
+        };
+        if current_status == "stopped" {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        }
+        count += 1;
+        let response_result = timeout(Duration::from_secs(20), reqwest::get(url.clone())).await;
+
+        match response_result {
+            Ok(Ok(response)) => {
+                if response.status().is_success() {
+                    let res_temp = response.bytes().await;
+
+                    match res_temp {
+                        Ok(bytes) => {
+                            res = bytes;
+                        }
+                        Err(_e) => {
+                            res = Bytes::from("");
+                            *err_counts.entry(&messages[3]).or_insert(3) += 1;
+                        }
+                    }
+                    break;
+                } else {
+                    res = Bytes::from("");
+                    *err_counts.entry(&messages[0]).or_insert(0) += 1;
+                }
+            }
+            Ok(Err(_e)) => {
+                res = Bytes::from("");
+                *err_counts.entry(&messages[1]).or_insert(0) += 1;
+            }
+            Err(_) => {
+                res = Bytes::from("");
+                *err_counts.entry(&messages[2]).or_insert(0) += 1;
+            }
+        }
+
+        if count > 10 {
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+
+    let mut error_msg = String::from("");
+    if res.is_empty() {
+        let mut error_str = format!(
+            "download img failed : group_index: {} index: {}",
+            group_index, index
+        );
+        for (msg, index) in err_counts {
+            error_str.push_str(&format!(" {}: {}", msg, index));
+        }
+        error_msg = error_str;
+    } else {
+        // 处理图片格式
+        if let Ok(img) = load_from_memory(&res) {
+            let jpg_bytes = img.to_rgb8();
+            if let Ok(mut output_file) = File::create(PathBuf::from(save_path)) {
+                if let Err(e) = jpg_bytes.write_to(&mut output_file, ImageFormat::Jpeg) {
+                    error_msg = format!(
+                        "Failed to write image to file for group {} index {}: {}",
+                        group_index, index, e
+                    );
+                }
+            } else {
+                error_msg = format!(
+                    "Failed to create file for group {} index {}",
+                    group_index, index
+                );
+            }
+        } else {
+            error_msg = format!(
+                "Failed to load image from memory for group {} index {}",
+                group_index, index
+            );
+        }
+
+        // 更新进度
+        if error_msg.is_empty() {
+            let mut progress_lock = progress.lock().unwrap();
+            *progress_lock += 1;
+        }
+    }
+
+    DownloadResult {
+        group_index,
+        index,
+        error_msg,
+    }
+}
+
+#[tauri::command]
+fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Channel<DownloadEvent>) {
+    let home_dir = home::home_dir().unwrap();
+    let comic_basic_path = home_dir.join(format!(".comic_dl_tauri/download/"));
+    let mut tasks = TASKS.write().unwrap();
+    let mut current_task = None;
+    for task in tasks.iter_mut() {
+        if task.id == id {
+            current_task = Some(task.clone());
+            task.status = status.clone();
+        }
+    }
+
+    if let Some(current_task_temp) = current_task {
+        let update_res = update_download_task_status(id, &status);
+        if update_res.is_ok() {
+            info!("update task status success: {}", id);
+            app.emit(
+                "task_status",
+                HashMap::from([("id", id.to_string()), ("status", status.clone())]),
+            )
+            .unwrap();
+            if status == "downloading" {
+                let complete_current_task: DownloadTask = get_download_task(id).unwrap();
+                let all_count = complete_current_task.count;
+                let cache_json_str = complete_current_task.cache_json;
+                if current_task_temp.dl_type == "juan"
+                    || current_task_temp.dl_type == "hua"
+                    || current_task_temp.dl_type == "fanwai"
+                {
+                    let cache_json: Vec<CurrentElement> =
+                        serde_json::from_str(&cache_json_str).unwrap();
+                    let semaphore = Arc::new(Semaphore::new(20));
+                    let total = all_count;
+                    let progress = Arc::new(Mutex::new(0));
+
+                    thread::spawn(move || {
+                        tokio::runtime::Builder::new_multi_thread()
+                            .enable_all()
+                            .build()
+                            .unwrap()
+                            .block_on(async {
+                                let mut overall_save_counter = 0;
+                                let mut all_results = Vec::new();
+                                let mut cache_json_sync = cache_json.clone();
+
+                                for (group_index, url_group) in cache_json.into_iter().enumerate() {
+                                    let mut join_set = JoinSet::new();
+                                    let group_total = url_group.count as u32;
+                                    let mut group_save_counter = 0;
+
+                                    for (i, url) in url_group.imgs.into_iter().enumerate() {
+                                        if url.done {
+                                            let mut progress_lock = progress.lock().unwrap();
+                                            *progress_lock += 1;
+                                            continue;
+                                        }
+                                        let comic_type =
+                                            match complete_current_task.dl_type.as_str() {
+                                                "juan" => String::from("单行本"),
+                                                "hua" => String::from("单话"),
+                                                "fanwai" => String::from("番外篇"),
+                                                "current" => String::from("current"),
+                                                _ => String::from(""),
+                                            };
+                                        let save_path_temp =
+                                            if complete_current_task.author.is_empty() {
+                                                comic_basic_path.join(format!(
+                                                    "{}_{}/{}/{}.jpg",
+                                                    complete_current_task.comic_name,
+                                                    &comic_type,
+                                                    url_group.name,
+                                                    i,
+                                                ))
+                                            } else {
+                                                comic_basic_path.join(format!(
+                                                    "{}/{}_{}/{}/{}.jpg",
+                                                    complete_current_task.author,
+                                                    complete_current_task.comic_name,
+                                                    &comic_type,
+                                                    url_group.name,
+                                                    i,
+                                                ))
+                                            };
+                                        let parent_path = save_path_temp.parent().unwrap();
+                                        if !parent_path.exists() {
+                                            fs::create_dir_all(parent_path).unwrap();
+                                        }
+                                        let save_path =
+                                            save_path_temp.to_str().unwrap().to_string().clone();
+                                        let url_str = url.href.clone();
+                                        let semaphore = semaphore.clone();
+                                        let progress = progress.clone();
+                                        join_set.spawn(download_single_image(
+                                            id,
+                                            group_index,
+                                            i,
+                                            url_str,
+                                            save_path,
+                                            semaphore,
+                                            progress,
+                                        ));
+                                    }
+
+                                    while let Some(res) = join_set.join_next().await {
+                                        if let Ok(result) = res {
+                                            all_results.push(result.clone());
+                                            if !&result.error_msg.is_empty() {
+                                                error!("Task error: {}", &result.error_msg);
+                                            } else {
+                                                cache_json_sync[result.group_index].imgs
+                                                    [result.index]
+                                                    .done = true;
+                                            }
+                                        } else {
+                                            error!("Task join error");
+                                        }
+                                        group_save_counter += 1;
+                                        overall_save_counter += 1;
+                                        if group_save_counter % 5 == 0 {
+                                            // 保存进度到数据库
+                                            let current_progress = *progress.lock().unwrap();
+
+                                            info!("current_progress: {}", current_progress);
+                                            let progress_str = format!(
+                                                "{:.2}",
+                                                ((current_progress as f32) / (total as f32)
+                                                    * 100.00)
+                                            );
+
+                                            let event_res = on_event.send(DownloadEvent {
+                                                id: complete_current_task.id,
+                                                progress: progress_str.clone(),
+                                                count: total,
+                                                now_count: current_progress as i32,
+                                                error_vec: String::from(""),
+                                            });
+                                            match event_res {
+                                                Ok(_s) => {}
+                                                Err(e) => {
+                                                    error!("on_event failed: {}", e);
+                                                }
+                                            }
+
+                                            if let Err(e) = update_download_task_progress(
+                                                complete_current_task.id,
+                                                &progress_str,
+                                                current_progress as i32,
+                                                &serde_json::to_string_pretty(&cache_json_sync)
+                                                    .unwrap(),
+                                            ) {
+                                                error!("save progress to db failed: {}", e);
+                                            } else {
+                                                let mut tasks = TASKS.write().unwrap();
+                                                if let Some(temp) = tasks
+                                                    .iter_mut()
+                                                    .find(|x| x.id == complete_current_task.id)
+                                                {
+                                                    temp.progress = progress_str;
+                                                    temp.now_count = current_progress as i32;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // 确保最后一次进度也保存到数据库
+                                let current_progress = *progress.lock().unwrap();
+                                let progress_str = format!(
+                                    "{:.2}",
+                                    ((current_progress as f32) / (total as f32) * 100.00)
+                                );
+
+                                on_event
+                                    .send(DownloadEvent {
+                                        id: complete_current_task.id,
+                                        progress: progress_str.clone(),
+                                        count: total,
+                                        now_count: current_progress as i32,
+                                        error_vec: String::from(""),
+                                    })
+                                    .unwrap();
+
+                                if let Err(e) = update_download_task_progress(
+                                    complete_current_task.id,
+                                    &progress_str,
+                                    current_progress as i32,
+                                    &serde_json::to_string_pretty(&cache_json_sync).unwrap(),
+                                ) {
+                                    error!("save progress to db failed: {}", e);
+                                } else {
+                                    let mut tasks = TASKS.write().unwrap();
+                                    if let Some(temp) =
+                                        tasks.iter_mut().find(|x| x.id == complete_current_task.id)
+                                    {
+                                        temp.progress = progress_str.clone();
+                                        temp.now_count = current_progress as i32;
+                                    }
+                                }
+
+                                // 可以在这里进一步处理所有的下载结果 all_results
+                                let mut error_vec: Vec<String> = Vec::new();
+                                for result in all_results {
+                                    if !result.error_msg.is_empty() {
+                                        error_vec.push(result.error_msg);
+                                    }
+                                }
+                                if !error_vec.is_empty() {
+                                    error!("Final result error: {:?}", &error_vec);
+
+                                    on_event
+                                        .send(DownloadEvent {
+                                            id: complete_current_task.id,
+                                            progress: progress_str.clone(),
+                                            count: total,
+                                            now_count: current_progress as i32,
+                                            error_vec: serde_json::to_string_pretty(&error_vec)
+                                                .unwrap(),
+                                        })
+                                        .unwrap();
+                                    if let Err(e) = update_download_task_error_vec(
+                                        complete_current_task.id,
+                                        serde_json::to_string_pretty(&error_vec).unwrap().as_str(),
+                                    ) {
+                                        error!("save error_msg to db failed: {}", e);
+                                    } else {
+                                        let mut tasks = TASKS.write().unwrap();
+                                        if let Some(temp) = tasks
+                                            .iter_mut()
+                                            .find(|x| x.id == complete_current_task.id)
+                                        {
+                                            temp.error_vec =
+                                                serde_json::to_string_pretty(&error_vec).unwrap();
+                                        }
+                                    }
+                                }
+                            });
+                    });
+                } else if current_task_temp.dl_type == "current" {
+                }
+            }
+        } else {
+            error!("update task status failed: {}, status: {}", id, &status);
+            app.emit("info_msg_main", "update task status failed")
+                .unwrap();
+        }
+    }
 }
 
 #[tauri::command]
@@ -185,9 +588,9 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                             } else {
                                 no_find = false;
                                 info!("already has this task!");
-                                app.emit_to("main", "info-msg-main", "already has this task!")
+                                app.emit_to("main", "info_msg_main", "already has this task!")
                                     .unwrap();
-                                app.emit_to("main", "info-msg-add", "already has this task!")
+                                app.emit_to("main", "info_msg_main", "already has this task!")
                                     .unwrap();
                             }
                         }
@@ -217,7 +620,10 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                                             &url,
                                             &res.author,
                                             &current_name,
-                                            "0.00%",
+                                            "0.00",
+                                            res.current_count as i32,
+                                            0 as i32,
+                                            "",
                                             false,
                                         );
                                         match db_res {
@@ -232,6 +638,9 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                                                     author: task.author,
                                                     comic_name: task.comic_name,
                                                     progress: task.progress,
+                                                    count: task.count,
+                                                    now_count: task.now_count,
+                                                    error_vec: task.error_vec,
                                                     done: task.done,
                                                 };
 
@@ -366,7 +775,7 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                                                         value,
                                                         &comic_json,
                                                         &app,
-                                                        url.clone(),
+                                                        data.url.clone(),
                                                     );
                                                 }
                                             }
@@ -381,7 +790,7 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                         }
                     }
                     let add_window = app.get_webview_window("add").unwrap();
-                    add_window.close();
+                    let _ = add_window.close();
                 }
                 "mangadex" => {
                     let _ = handle_mangadex(url.clone()).await;
@@ -432,10 +841,12 @@ pub fn add_new_task_juan_hua_fanwai(
         }
     }
     if no_find {
+        let mut all_count: i32 = 0;
         let new_value = value
             .clone()
             .iter()
             .map(|x| {
+                all_count += x.count as i32;
                 let temp = CurrentElement {
                     name: x.name.clone(),
                     href: x.href.clone(),
@@ -456,7 +867,10 @@ pub fn add_new_task_juan_hua_fanwai(
             &url,
             &res.author,
             &res.comic_name,
-            "0.00%",
+            "0.00",
+            all_count,
+            0 as i32,
+            "",
             false,
         );
         match db_res {
@@ -471,6 +885,9 @@ pub fn add_new_task_juan_hua_fanwai(
                     author: task.author,
                     comic_name: task.comic_name,
                     progress: task.progress,
+                    count: all_count,
+                    now_count: task.now_count,
+                    error_vec: task.error_vec,
                     done: task.done,
                 };
 

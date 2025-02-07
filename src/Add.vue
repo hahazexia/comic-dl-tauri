@@ -80,7 +80,7 @@ function parseUrlParams(url: string) {
 
 <template>
   <div class="add-box">
-    <textarea class="input" name="url" :value="url" @change="(e: any) => urlChange(e)" spellcheck="false"></textarea>
+    <textarea class="input" name="url" :value="url" @input="(e: any) => urlChange(e)" spellcheck="false"></textarea>
     <div class="tool">
       <div class="left">
         <select name="type" class="select" :value="type" @change="(e: any) => typeChange(e)">

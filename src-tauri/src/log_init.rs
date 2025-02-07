@@ -33,9 +33,9 @@ pub fn init_log() -> Result<(), SetLoggerError> {
 
     let home_dir = home::home_dir().unwrap();
     let log_path = home_dir
-        .join(".comit_dl_tauri")
+        .join(".comic_dl_tauri")
         .join(format!("log/log-{}.log", timestamp));
-    let archive_log_path = home_dir.join(".comit_dl_tauri").join("log/archive.{}.log");
+    let archive_log_path = home_dir.join(".comic_dl_tauri").join("log/archive.{}.log");
     let file_path: &str = log_path.to_str().unwrap();
     let archive_path: &str = archive_log_path.to_str().unwrap();
 

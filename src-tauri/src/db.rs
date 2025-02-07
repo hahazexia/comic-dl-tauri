@@ -59,6 +59,9 @@ pub fn create_table() -> QueryResult<()> {
             author TEXT NOT NULL,
             comic_name TEXT NOT NULL,
             progress TEXT NOT NULL,
+            count INTEGER NOT NULL,
+            now_count INTEGER NOT NULL,
+            error_vec TEXT NOT NULL,
             done BOOLEAN NOT NULL
         );
     "#;
@@ -75,6 +78,9 @@ pub fn create_download_task(
     _author: &str,
     _comic_name: &str,
     _progress: &str,
+    _count: i32,
+    _now_count: i32,
+    _error_vec: &str,
     _done: bool,
 ) -> QueryResult<DownloadTask> {
     use crate::schema::download_tasks::dsl::*;
@@ -89,6 +95,9 @@ pub fn create_download_task(
         author: _author,
         comic_name: _comic_name,
         progress: _progress,
+        count: _count,
+        now_count: _now_count,
+        error_vec: _error_vec,
         done: _done,
     };
 
@@ -103,31 +112,38 @@ pub fn create_download_task(
 }
 
 // 更新下载任务
-pub fn update_download_task(
+pub fn update_download_task_status(task_id: i32, status_temp: &str) -> QueryResult<usize> {
+    use crate::schema::download_tasks::dsl::*;
+    let mut conn = DB_CONNECTION.get().unwrap().lock().unwrap();
+
+    diesel::update(download_tasks.find(task_id))
+        .set((status.eq(status_temp)))
+        .execute(&mut *conn)
+}
+
+pub fn update_download_task_progress(
     task_id: i32,
-    dl_type: &str,
-    status: &str,
-    local_path: &str,
-    cache_json: &str,
-    url: &str,
-    author: &str,
-    comic_name: &str,
-    done: bool,
+    _progress: &str,
+    _now_count: i32,
+    _cache_json: &str,
 ) -> QueryResult<usize> {
     use crate::schema::download_tasks::dsl::*;
     let mut conn = DB_CONNECTION.get().unwrap().lock().unwrap();
 
     diesel::update(download_tasks.find(task_id))
         .set((
-            dl_type.eq(dl_type),
-            status.eq(status),
-            local_path.eq(local_path),
-            cache_json.eq(cache_json),
-            url.eq(url),
-            author.eq(author),
-            comic_name.eq(comic_name),
-            done.eq(done),
+            progress.eq(_progress),
+            now_count.eq(_now_count),
+            cache_json.eq(_cache_json),
         ))
+        .execute(&mut *conn)
+}
+pub fn update_download_task_error_vec(task_id: i32, _error_vec: &str) -> QueryResult<usize> {
+    use crate::schema::download_tasks::dsl::*;
+    let mut conn = DB_CONNECTION.get().unwrap().lock().unwrap();
+
+    diesel::update(download_tasks.find(task_id))
+        .set((error_vec.eq(_error_vec)))
         .execute(&mut *conn)
 }
 
@@ -160,7 +176,8 @@ pub fn get_all_download_tasks() -> QueryResult<Vec<PartialDownloadTask>> {
 
     download_tasks
         .select((
-            id, dl_type, status, local_path, url, author, comic_name, progress, done,
+            id, dl_type, status, local_path, url, author, comic_name, progress, count, now_count,
+            error_vec, done,
         ))
         .load::<PartialDownloadTask>(&mut *conn)
     // download_tasks.load::<DownloadTask>(&mut *conn)
@@ -199,7 +216,7 @@ fn db_file_exists() -> bool {
 fn get_db_path() -> String {
     let home_dir = home::home_dir().unwrap();
     home_dir
-        .join(".comit_dl_tauri/db/db.sqlite")
+        .join(".comic_dl_tauri/db/db.sqlite")
         .to_str()
         .unwrap()
         .to_string()

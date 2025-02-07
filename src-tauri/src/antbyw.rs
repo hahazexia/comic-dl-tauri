@@ -73,8 +73,8 @@ pub struct CurrentElement {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[allow(dead_code)]
 pub struct Img {
-    href: String,
-    done: bool,
+    pub href: String,
+    pub done: bool,
 }
 
 #[allow(dead_code)]
@@ -90,7 +90,7 @@ pub async fn handle_html(url: String, dl_type: String, app: &AppHandle) -> Handl
 
     match dl_type.clone().as_str() {
         "juan" | "hua" | "fanwai" | "juan_hua_fanwai" => {
-            let res = handle_comic_html(url.clone(), app).await;
+            let res = handle_comic_html(url.clone(), String::from(""), app).await;
             res
         }
         "current" => {
@@ -121,11 +121,11 @@ pub async fn handle_author_html(url: String, app: &AppHandle) -> HandleHtmlRes {
 
     let home_dir = home::home_dir().unwrap();
     let author_html_cache_path = home_dir.join(format!(
-        ".comit_dl_tauri/html_cache/antbyw_author_{}.htmlcache",
+        ".comic_dl_tauri/html_cache/antbyw_author_{}.htmlcache",
         &zz_name
     ));
     let author_json_cache_path = home_dir.join(format!(
-        ".comit_dl_tauri/json_cache/antbyw_author_{}.json",
+        ".comic_dl_tauri/json_cache/antbyw_author_{}.json",
         &zz_name
     ));
 
@@ -244,7 +244,7 @@ pub async fn handle_author_html(url: String, app: &AppHandle) -> HandleHtmlRes {
     for (i, data) in json_data.iter().enumerate() {
         let mut temp = data.clone();
         if !data.done {
-            let comic_res = handle_comic_html(data.url.clone(), app).await;
+            let comic_res = handle_comic_html(data.url.clone(), zz_name.clone(), app).await;
             if comic_res.done {
                 temp.local = comic_res.local;
                 temp.done = true;
@@ -295,17 +295,17 @@ pub async fn handle_author_html(url: String, app: &AppHandle) -> HandleHtmlRes {
     res
 }
 
-pub async fn handle_comic_html(url: String, app: &AppHandle) -> HandleHtmlRes {
+pub async fn handle_comic_html(url: String, author: String, app: &AppHandle) -> HandleHtmlRes {
     // 获取漫画页面 kuid
     let kuid = get_url_query(url.clone(), String::from("kuid"));
     // 系统的用户目录
     let home_dir = home::home_dir().unwrap();
     let comic_html_cache_path = home_dir.join(format!(
-        ".comit_dl_tauri/html_cache/antbyw_comic_{}.htmlcache",
+        ".comic_dl_tauri/html_cache/antbyw_comic_{}.htmlcache",
         &kuid
     ));
     let comic_json_cache_path = home_dir.join(format!(
-        ".comit_dl_tauri/json_cache/antbyw_comic_{}.json",
+        ".comic_dl_tauri/json_cache/antbyw_comic_{}.json",
         &kuid
     ));
 
@@ -382,7 +382,7 @@ pub async fn handle_comic_html(url: String, app: &AppHandle) -> HandleHtmlRes {
     let mut content_vec = Vec::new();
     let mut json_data: HashMap<String, Vec<CurrentElement>> = HashMap::new();
     let mut comic_name: String = String::from("");
-    let mut author: String = String::from("");
+    // let mut author: String = String::from("");
 
     if let Some(data) = json_data_from_read {
         json_data = if let DataWrapper::HashMapData(temp_data) = data.data {
@@ -405,9 +405,9 @@ pub async fn handle_comic_html(url: String, app: &AppHandle) -> HandleHtmlRes {
             .to_owned()
             .inner_html();
         // 获取第一个作者名
-        let author_selector = scraper::Selector::parse(".uk-label.uk-label-border.mbn").unwrap();
-        let author_temp: Vec<_> = document.select(&author_selector).to_owned().collect();
-        author = author_temp.first().unwrap().inner_html();
+        // let author_selector = scraper::Selector::parse(".uk-label.uk-label-border.mbn").unwrap();
+        // let author_temp: Vec<_> = document.select(&author_selector).to_owned().collect();
+        // author = author_temp.first().unwrap().inner_html();
 
         // 获取三个 title 单行本 单话 番外篇
         let juan_hua_fanwai_title_selector =
@@ -592,11 +592,11 @@ pub async fn handle_current_html(url: String) -> HandleHtmlRes {
     // 系统的用户目录
     let home_dir = home::home_dir().unwrap();
     let current_html_cache_path = home_dir.join(format!(
-        ".comit_dl_tauri/html_cache/antbyw_current_{}.htmlcache",
+        ".comic_dl_tauri/html_cache/antbyw_current_{}.htmlcache",
         &zjid
     ));
     let current_json_cache_path = home_dir.join(format!(
-        ".comit_dl_tauri/json_cache/antbyw_current_{}.json",
+        ".comic_dl_tauri/json_cache/antbyw_current_{}.json",
         &zjid
     ));
 

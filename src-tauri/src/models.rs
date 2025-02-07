@@ -15,6 +15,9 @@ pub struct DownloadTask {
     pub author: String,
     pub comic_name: String,
     pub progress: String,
+    pub count: i32,
+    pub now_count: i32,
+    pub error_vec: String,
     pub done: bool,
 }
 
@@ -29,6 +32,9 @@ pub struct NewDownloadTask<'a> {
     pub(crate) author: &'a str,
     pub(crate) comic_name: &'a str,
     pub(crate) progress: &'a str,
+    pub(crate) count: i32,
+    pub(crate) now_count: i32,
+    pub(crate) error_vec: &'a str,
     pub(crate) done: bool,
 }
 
@@ -44,5 +50,8 @@ pub struct PartialDownloadTask {
     pub author: String,
     pub comic_name: String,
     pub progress: String,
+    pub count: i32,
+    pub now_count: i32,
+    pub error_vec: String,
     pub done: bool,
 }

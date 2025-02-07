@@ -221,7 +221,7 @@ pub fn create_cache_dir() -> Result<StatusCode, ErrorMsg> {
     let home_dir = home::home_dir();
 
     if let Some(home_dir_temp) = home_dir {
-        let final_path = home_dir_temp.join(".comit_dl_tauri");
+        let final_path = home_dir_temp.join(".comic_dl_tauri");
         let html_cache_path = final_path.join("html_cache");
         let json_cache_path = final_path.join("json_cache");
         let log_path = final_path.join("log");
@@ -235,7 +235,7 @@ pub fn create_cache_dir() -> Result<StatusCode, ErrorMsg> {
                         &final_path
                             .file_name()
                             .and_then(|name| name.to_str())
-                            .unwrap_or(".comit_dl_tauri")
+                            .unwrap_or(".comic_dl_tauri")
                     )
                     .as_str(),
                 ));

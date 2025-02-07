@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from "vue";
 import { listen } from '@tauri-apps/api/event';
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { toast } from 'vue3-toastify';
 import 'vue3-toastify/dist/index.css';
@@ -15,9 +15,26 @@ interface Tasks {
   author: string,
   comic_name: string,
   progress: string,
+  count: number,
+  now_count: number,
+  error_vec: string,
   done: boolean,
 };
 
+interface DownloadEvent {
+  id: number,
+  progress: string,
+  count: number,
+  now_count: number,
+  error_vec: string,
+}
+
+const dl_type_map = ref<any>({
+  juan: '单行本',
+  hua: '单话',
+  fanwai: '番外篇',
+  current: '',
+});
 const tasks_current = reactive<Tasks[]>([]);
 const tasks_all = reactive<Tasks[]>([]);
 const active_menu = ref('all');
@@ -30,6 +47,9 @@ const del_task = ref<Tasks>({
   author: "",
   comic_name: "",
   progress: "",
+  count: 0,
+  now_count: 0,
+  error_vec: "",
   done: false
 });
 const isModalOpen = ref(false);
@@ -92,6 +112,24 @@ const closeModal = () => {
   isModalOpen.value = false;
 };
 
+const startOrPause = async (data: any, status: string) => {
+  console.log(data);
+  const onEvent = new Channel<DownloadEvent>();
+  onEvent.onmessage = (message: any) => {
+    const index = tasks_all.findIndex(item => item.id === message.id);
+    const index2 = tasks_current.findIndex(item => item.id === message.id);
+
+    tasks_all[index].progress = message.progress;
+    tasks_all[index].now_count = message.now_count;
+    tasks_all[index].error_vec = message.error_vec;
+
+    tasks_current[index2].progress = message.progress;
+    tasks_current[index2].now_count = message.now_count;
+    tasks_current[index2].error_vec = message.error_vec;
+  };
+  await invoke("start_or_pause", { id: data.id, status: status, onEvent });
+};
+
 const confirmDelete = async () => {
   let del_id = await invoke("delete_tasks", { id: del_task.value?.id });
   const index = tasks_all.findIndex(item => item.id === del_id);
@@ -124,6 +162,26 @@ onMounted(() => {
   listen('new_task', (e: any) => {
     tasks_all.push(e.payload);
     calc_tasks_current();
+  });
+
+  listen('task_status', (e: any) => {
+    let data = e.payload;
+    tasks_all.forEach((i: any) => {
+      if (i.id === Number(data.id)) {
+        i.status = data.status;
+      }
+    });
+    tasks_current.forEach((i: any) => {
+      if (i.id === Number(data.id)) {
+        i.status = data.status;
+      }
+    });
+    tasks_all.sort((a: any) => {
+      return a.status === 'downloading' ? -1 : 1;
+    });
+    tasks_current.sort((a: any) => {
+      return a.status === 'downloading' ? -1 : 1;
+    });
   });
 
   const appWindow = getCurrentWindow();
@@ -162,10 +220,13 @@ onMounted(() => {
     </div>
     <div class="list">
       <div class="list-item" v-for="data in tasks_current" :key="data.id">
-        <div class="name" v-text="data.comic_name" :title="data.comic_name"></div>
+        <div class="name" :class="{ 'downloading-name': data.status === 'downloading' }"
+          v-text="`${data.comic_name}_${dl_type_map[data.dl_type]}`"
+          :title="`${data.comic_name}_${dl_type_map[data.dl_type]}`"></div>
         <div class="desc">
           <div class="status" :class="data.status" v-text="data.status"></div>
-          <div class="progress-num" v-text="data.progress"></div>
+          <div class="progress-num" v-text="`${data.progress}%`"></div>
+          <div class="progress-count" v-text="`${data.now_count}/${data.count}`"></div>
 
           <div class="info" v-text="`id:${data.id}`"></div>
           <div class="info" v-text="`author:${data.author}`"></div>
@@ -173,13 +234,16 @@ onMounted(() => {
         </div>
         <div class="progress">
           <div class="progress-inner" :style="{
-            width: data.progress,
+            width: `${data.progress}%`,
           }"></div>
         </div>
         <div class="tool-bar">
           <div class="left"></div>
           <div class="right">
-            <div class="pause"></div>
+            <div :class="{
+              pause: data.status === 'downloading',
+              start: data.status !== 'downloading',
+            }" @click="() => startOrPause(data, data.status === 'downloading' ? 'stopped' : 'downloading')"></div>
             <div class="delete" @click="() => deleteTask(data)"></div>
           </div>
         </div>
@@ -305,6 +369,10 @@ onMounted(() => {
         word-break: break-all;
       }
 
+      .downloading-name {
+        color: #4872ac;
+      }
+
       .desc {
         margin-top: 5px;
         display: flex;
@@ -346,6 +414,7 @@ onMounted(() => {
 
         .status,
         .progress-num,
+        .progress-count,
         .info {
           font-size: 12px;
         }
@@ -353,6 +422,10 @@ onMounted(() => {
         .progress-num {
           margin-left: 5px;
           color: #4872ac;
+        }
+
+        .progress-count {
+          margin-left: 10px;
         }
 
         .info {
@@ -385,6 +458,7 @@ onMounted(() => {
           align-content: center;
 
           .pause,
+          .start,
           .delete {
             background-repeat: no-repeat;
             background-size: contain;
@@ -395,6 +469,10 @@ onMounted(() => {
 
           .pause {
             background-image: url('./img/pause.png');
+          }
+
+          .start {
+            background-image: url('./img/start.png');
           }
 
           .delete {
