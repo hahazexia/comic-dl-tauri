@@ -67,6 +67,9 @@ const task_stopped = computed(() => {
 const task_failed = computed(() => {
   return tasks_all.filter(task => task.status === 'failed');
 });
+const task_waiting = computed(() => {
+  return tasks_all.filter(task => task.status === 'waiting');
+});
 
 async function add() {
   await invoke("add");
@@ -98,11 +101,27 @@ function calc_tasks_current(menu?: any) {
       tasks_current.push(...task_failed.value);
       break;
   }
+  sortTasks();
 }
 
 function deleteTask(data: any) {
   del_task.value = data;
   openModal();
+}
+
+function sortTasks() {
+  const statusOrder = ['downloading', 'waiting', 'stopped', 'failed', 'finished'];
+
+  tasks_all.sort((a, b) => {
+    const indexA = statusOrder.indexOf(a.status);
+    const indexB = statusOrder.indexOf(b.status);
+    return indexA - indexB;
+  });
+  tasks_current.sort((a, b) => {
+    const indexA = statusOrder.indexOf(a.status);
+    const indexB = statusOrder.indexOf(b.status);
+    return indexA - indexB;
+  });
 }
 
 const openModal = () => {
@@ -115,6 +134,10 @@ const closeModal = () => {
 
 const startOrPause = async (data: any, status: string) => {
   console.log(data);
+  startTask(data, status);
+};
+
+async function startTask(data: any, status: string) {
   const onEvent = new Channel<DownloadEvent>();
   onEvent.onmessage = (message: any) => {
     const index = tasks_all.findIndex(item => item.id === message.id);
@@ -130,9 +153,11 @@ const startOrPause = async (data: any, status: string) => {
     tasks_current[index2].now_count = message.now_count;
     tasks_current[index2].error_vec = message.error_vec;
     tasks_current[index2].status = message.status;
+
+    sortTasks();
   };
   await invoke("start_or_pause", { id: data.id, status: status, onEvent });
-};
+}
 
 const confirmDelete = async () => {
   let del_id = await invoke("delete_tasks", { id: del_task.value?.id });
@@ -180,11 +205,14 @@ onMounted(() => {
         i.status = data.status;
       }
     });
-    tasks_all.sort((a: any) => {
-      return a.status === 'downloading' ? -1 : 1;
-    });
-    tasks_current.sort((a: any) => {
-      return a.status === 'downloading' ? -1 : 1;
+
+    sortTasks();
+  });
+
+  listen('start_waiting', (e: any) => {
+    let will_starts: any = e.payload;
+    will_starts.forEach((i: any) => {
+      startTask({ id: i }, 'downloading');
     });
   });
 
@@ -202,6 +230,8 @@ onMounted(() => {
     console.log(res, 'get_tasks');
     tasks_all.push(...res);
     tasks_current.push(...res);
+
+    sortTasks();
   })();
 });
 </script>
@@ -214,10 +244,12 @@ onMounted(() => {
       <div class="menu-option downloading" :class="{ active: active_menu === 'downloading' }"
         @click="() => switchMenu('downloading')">Downloading<span class="num" v-text="task_downloading.length"></span>
       </div>
-      <div class="menu-option finished" :class="{ active: active_menu === 'finished' }"
-        @click="() => switchMenu('finished')">Finished<span class="num" v-text="task_finished.length"></span></div>
+      <div class="menu-option waiting" :class="{ active: active_menu === 'waiting' }"
+        @click="() => switchMenu('waiting')">Waiting<span class="num" v-text="task_waiting.length"></span></div>
       <div class="menu-option stopped" :class="{ active: active_menu === 'stopped' }"
         @click="() => switchMenu('stopped')">Stopped<span class="num" v-text="task_stopped.length"></span></div>
+      <div class="menu-option finished" :class="{ active: active_menu === 'finished' }"
+        @click="() => switchMenu('finished')">Finished<span class="num" v-text="task_finished.length"></span></div>
       <div class="menu-option failed" :class="{ active: active_menu === 'failed' }" @click="() =>
         switchMenu('failed')">Failed<span class="num" v-text="task_failed.length"></span></div>
       <div class="add" title="create new task" @click="add"></div>
@@ -245,9 +277,11 @@ onMounted(() => {
           <div class="left"></div>
           <div class="right">
             <div v-if="data.status !== 'finished'" :class="{
-              pause: data.status === 'downloading',
-              start: data.status !== 'downloading',
-            }" @click="() => startOrPause(data, data.status === 'downloading' ? 'stopped' : 'downloading')"></div>
+              pause: data.status === 'downloading' || data.status === 'waiting',
+              start: data.status === 'stopped' || data.status === 'failed',
+            }"
+              @click="() => startOrPause(data, (data.status === 'downloading' || data.status === 'waiting') ? 'stopped' : 'downloading')">
+            </div>
             <div class="delete" @click="() => deleteTask(data)"></div>
           </div>
         </div>
@@ -336,6 +370,10 @@ onMounted(() => {
       background-image: url('./img/download.png');
     }
 
+    .waiting::before {
+      background-image: url('./img/wait.png');
+    }
+
     .finished::before {
       background-image: url('./img/ok.png');
     }
@@ -402,6 +440,10 @@ onMounted(() => {
 
         .downloading::before {
           background-image: url('./img/download.png');
+        }
+
+        .waiting::before {
+          background-image: url('./img/wait.png');
         }
 
         .finished::before {
