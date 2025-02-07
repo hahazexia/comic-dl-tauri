@@ -138,12 +138,16 @@ pub fn update_download_task_progress(
         ))
         .execute(&mut *conn)
 }
-pub fn update_download_task_error_vec(task_id: i32, _error_vec: &str) -> QueryResult<usize> {
+pub fn update_download_task_error_vec(
+    task_id: i32,
+    _error_vec: &str,
+    _status: &str,
+) -> QueryResult<usize> {
     use crate::schema::download_tasks::dsl::*;
     let mut conn = DB_CONNECTION.get().unwrap().lock().unwrap();
 
     diesel::update(download_tasks.find(task_id))
-        .set((error_vec.eq(_error_vec)))
+        .set((error_vec.eq(_error_vec), status.eq(_status)))
         .execute(&mut *conn)
 }
 

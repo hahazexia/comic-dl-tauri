@@ -27,6 +27,7 @@ interface DownloadEvent {
   count: number,
   now_count: number,
   error_vec: string,
+  status: string,
 }
 
 const dl_type_map = ref<any>({
@@ -122,10 +123,13 @@ const startOrPause = async (data: any, status: string) => {
     tasks_all[index].progress = message.progress;
     tasks_all[index].now_count = message.now_count;
     tasks_all[index].error_vec = message.error_vec;
+    tasks_all[index].status = message.status;
+
 
     tasks_current[index2].progress = message.progress;
     tasks_current[index2].now_count = message.now_count;
     tasks_current[index2].error_vec = message.error_vec;
+    tasks_current[index2].status = message.status;
   };
   await invoke("start_or_pause", { id: data.id, status: status, onEvent });
 };
@@ -240,7 +244,7 @@ onMounted(() => {
         <div class="tool-bar">
           <div class="left"></div>
           <div class="right">
-            <div :class="{
+            <div v-if="data.status !== 'finished'" :class="{
               pause: data.status === 'downloading',
               start: data.status !== 'downloading',
             }" @click="() => startOrPause(data, data.status === 'downloading' ? 'stopped' : 'downloading')"></div>
