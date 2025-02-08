@@ -72,7 +72,7 @@ const task_waiting = computed(() => {
 });
 
 async function add() {
-  await invoke("add");
+  await invoke("add").then(console.log).catch(console.error);
 }
 
 function switchMenu(menu: string) {

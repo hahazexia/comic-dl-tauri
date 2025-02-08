@@ -304,7 +304,7 @@ fn start_waiting(app: &AppHandle) {
 }
 
 #[tauri::command]
-fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Channel<DownloadEvent>) {
+async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Channel<DownloadEvent>) {
     if status == "stopped" {
         let mut tasks = TASKS.write().unwrap();
         for task in tasks.iter_mut() {
@@ -892,13 +892,13 @@ fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Channel<Dow
 }
 
 #[tauri::command]
-fn get_tasks(_app: AppHandle) -> Vec<PartialDownloadTask> {
+async fn get_tasks(_app: AppHandle) -> Vec<PartialDownloadTask> {
     info!("get_tasks");
     let tasks = TASKS.read().unwrap().clone();
     tasks
 }
 #[tauri::command]
-fn delete_tasks(_app: AppHandle, id: i32) -> isize {
+async fn delete_tasks(_app: AppHandle, id: i32) -> isize {
     let del_res = delete_download_task(id);
     match del_res {
         Ok(res) => {
@@ -916,7 +916,7 @@ fn delete_tasks(_app: AppHandle, id: i32) -> isize {
 
 // WindowConfig https://docs.rs/tauri-utils/latest/tauri_utils/config/struct.WindowConfig.html
 #[tauri::command]
-fn add(app: AppHandle) {
+async fn add(app: AppHandle) {
     info!("open add task window");
     let config = tauri_utils::config::WindowConfig {
         label: "add".to_string(),
