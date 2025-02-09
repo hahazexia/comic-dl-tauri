@@ -1,5 +1,5 @@
-use crate::models::*;
 use crate::utils::ErrorMsg;
+use crate::{models::*, StartAllData};
 use diesel::connection::SimpleConnection;
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
@@ -7,7 +7,6 @@ use log::{error, info};
 use std::fs;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
-// use rusqlite::{Connection, Result};
 
 // pub static DB_CONNECTION: OnceLock<Mutex<Connection>> = OnceLock::new();
 pub static DB_CONNECTION: OnceLock<Mutex<SqliteConnection>> = OnceLock::new();
@@ -117,7 +116,7 @@ pub fn update_download_task_status(task_id: i32, status_temp: &str) -> QueryResu
     let mut conn = DB_CONNECTION.get().unwrap().lock().unwrap();
 
     diesel::update(download_tasks.find(task_id))
-        .set((status.eq(status_temp)))
+        .set(status.eq(status_temp))
         .execute(&mut *conn)
 }
 
@@ -199,6 +198,24 @@ pub fn find_tasks_by_dl_type_and_url(
         .filter(dl_type.eq(target_dl_type))
         .filter(url.eq(target_url))
         .load::<DownloadTask>(&mut *conn)
+}
+
+pub fn update_batch_status(tasks: &Vec<StartAllData>) {
+    use crate::schema::download_tasks::dsl::*;
+    let mut conn = DB_CONNECTION.get().unwrap().lock().unwrap();
+
+    for i in tasks.iter() {
+        let _ = diesel::update(download_tasks.find(i.id))
+            .set(status.eq(i.status.clone()))
+            .execute(&mut *conn);
+    }
+}
+
+pub fn delete_batch_status_not_downloading(ids: Vec<i32>) -> QueryResult<usize> {
+    use crate::schema::download_tasks::dsl::*;
+    let mut conn = DB_CONNECTION.get().unwrap().lock().unwrap();
+
+    diesel::delete(download_tasks.filter(id.eq_any(ids))).execute(&mut *conn)
 }
 
 fn create_db_file() {

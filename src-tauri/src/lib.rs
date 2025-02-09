@@ -11,9 +11,10 @@ mod utils;
 use antbyw::{handle_html, CurrentElement, DataWrapper, HandleHtmlRes, Img};
 use bytes::Bytes;
 use db::{
-    create_download_task, create_table, delete_download_task, find_tasks_by_dl_type_and_url,
-    get_all_download_tasks, get_download_task, init_db, update_download_task_error_vec,
-    update_download_task_progress, update_download_task_status,
+    create_download_task, create_table, delete_batch_status_not_downloading, delete_download_task,
+    find_tasks_by_dl_type_and_url, get_all_download_tasks, get_download_task, init_db,
+    update_batch_status, update_download_task_error_vec, update_download_task_progress,
+    update_download_task_status,
 };
 use image::{load_from_memory, ImageFormat};
 use log::{error, info};
@@ -31,7 +32,7 @@ use tauri::{ipc::Channel, AppHandle, Emitter, Manager};
 use tokio::sync::Semaphore;
 use tokio::task::{AbortHandle, JoinSet};
 use tokio::time::{timeout, Duration};
-use utils::{create_cache_dir, get_second_level_domain, read_from_json, StatusCode};
+use utils::{clean_string, create_cache_dir, get_second_level_domain, read_from_json, StatusCode};
 
 pub static TASKS: RwLock<Vec<PartialDownloadTask>> = RwLock::new(Vec::new());
 
@@ -50,6 +51,18 @@ pub struct DownloadEvent {
     now_count: i32,
     error_vec: String,
     status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StartAllData {
+    id: i32,
+    status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StartAllRes {
+    tasks: Vec<PartialDownloadTask>,
+    changed: Vec<StartAllData>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -104,6 +117,10 @@ pub fn run() {
             add_new_task,
             delete_tasks,
             start_or_pause,
+            start_all,
+            delete_all,
+            pause_all,
+            pause_all_waiting,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -136,8 +153,8 @@ async fn download_single_image(
         Ok(permit) => permit,
         Err(_) => {
             let error_msg = format!(
-                "Failed to acquire semaphore for group {} index {}",
-                group_index, index
+                "Failed to acquire semaphore for save_path: {} group: {} index: {}",
+                &save_path, group_index, index
             );
             return DownloadResult {
                 group_index,
@@ -209,8 +226,8 @@ async fn download_single_image(
     let mut error_msg = String::from("");
     if res.is_empty() {
         let mut error_str = format!(
-            "download img failed : group_index: {} index: {}",
-            group_index, index
+            "download img failed: save_path: {} group_index: {} index: {}",
+            &save_path, group_index, index
         );
         for (msg, index) in err_counts {
             error_str.push_str(&format!(" {}: {}", msg, index));
@@ -220,23 +237,23 @@ async fn download_single_image(
         // 处理图片格式
         if let Ok(img) = load_from_memory(&res) {
             let jpg_bytes = img.to_rgb8();
-            if let Ok(mut output_file) = File::create(PathBuf::from(save_path)) {
+            if let Ok(mut output_file) = File::create(PathBuf::from(&save_path)) {
                 if let Err(e) = jpg_bytes.write_to(&mut output_file, ImageFormat::Jpeg) {
                     error_msg = format!(
-                        "Failed to write image to file for group {} index {}: {}",
-                        group_index, index, e
+                        "Failed to write image to file for save_path: {} group: {} index: {} e: {}",
+                        &save_path, group_index, index, e
                     );
                 }
             } else {
                 error_msg = format!(
-                    "Failed to create file for group {} index {}",
-                    group_index, index
+                    "Failed to create file for save_path: {} group: {} index: {}",
+                    &save_path, group_index, index
                 );
             }
         } else {
             error_msg = format!(
-                "Failed to load image from memory for group {} index {}",
-                group_index, index
+                "Failed to load image from memory for save_path: {} group: {} index: {}",
+                &save_path, group_index, index
             );
         }
 
@@ -266,7 +283,7 @@ fn sort_tasks() {
 }
 
 fn get_downloading_count() -> i32 {
-    let tasks = TASKS.write().unwrap();
+    let tasks = TASKS.read().unwrap();
     let mut count = 0;
     for task in tasks.iter() {
         if task.status == "downloading" {
@@ -321,6 +338,7 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
         .unwrap();
         return;
     }
+
     let home_dir = home::home_dir().unwrap();
     let comic_basic_path = home_dir.join(format!(".comic_dl_tauri/download/"));
     let downloading_count = get_downloading_count();
@@ -897,6 +915,67 @@ async fn get_tasks(_app: AppHandle) -> Vec<PartialDownloadTask> {
     let tasks = TASKS.read().unwrap().clone();
     tasks
 }
+
+#[tauri::command]
+async fn start_all(_app: AppHandle) -> StartAllRes {
+    info!("start_all ");
+    let mut tasks = TASKS.write().unwrap();
+    let mut count = 0;
+    let mut data_for_db: Vec<StartAllData> = Vec::new();
+    for task in tasks.iter_mut() {
+        if task.status == "downloading" {
+            count += 1;
+            continue;
+        } else if task.status == "stopped" || task.status == "failed" {
+            info!(
+                "start_all status: {} id: {} count: {}",
+                task.status, task.id, count
+            );
+            if count >= 2 {
+                task.status = String::from("waiting");
+                data_for_db.push(StartAllData {
+                    id: task.id,
+                    status: String::from("waiting"),
+                });
+            } else {
+                task.status = String::from("downloading");
+                data_for_db.push(StartAllData {
+                    id: task.id,
+                    status: String::from("downloading"),
+                });
+                count += 1;
+            }
+        }
+    }
+    info!("data_for_db: {:?}", &data_for_db);
+    update_batch_status(&data_for_db);
+
+    let tasks_res = tasks.clone();
+    StartAllRes {
+        tasks: tasks_res,
+        changed: data_for_db,
+    }
+}
+
+#[tauri::command]
+async fn delete_all() -> Vec<PartialDownloadTask> {
+    let mut tasks = TASKS.write().unwrap();
+    let mut data_for_db: Vec<i32> = Vec::new();
+    let mut new_tasks: Vec<PartialDownloadTask> = Vec::new();
+    for task in tasks.drain(..) {
+        if task.status != "downloading" {
+            data_for_db.push(task.id);
+        } else {
+            new_tasks.push(task);
+        }
+    }
+    *tasks = new_tasks;
+
+    let _ = delete_batch_status_not_downloading(data_for_db);
+
+    tasks.clone()
+}
+
 #[tauri::command]
 async fn delete_tasks(_app: AppHandle, id: i32) -> isize {
     let del_res = delete_download_task(id);
@@ -912,6 +991,42 @@ async fn delete_tasks(_app: AppHandle, id: i32) -> isize {
             -1
         }
     }
+}
+
+#[tauri::command]
+async fn pause_all(_app: AppHandle) -> Vec<PartialDownloadTask> {
+    let mut tasks = TASKS.write().unwrap();
+    let mut data_for_db: Vec<StartAllData> = Vec::new();
+    for task in tasks.iter_mut() {
+        if task.status == "downloading" || task.status == "waiting" {
+            task.status = String::from("stopped");
+            data_for_db.push(StartAllData {
+                id: task.id,
+                status: String::from("stopped"),
+            });
+        }
+    }
+    update_batch_status(&data_for_db);
+
+    tasks.clone()
+}
+
+#[tauri::command]
+async fn pause_all_waiting() -> Vec<PartialDownloadTask> {
+    let mut tasks = TASKS.write().unwrap();
+    let mut data_for_db: Vec<StartAllData> = Vec::new();
+    for task in tasks.iter_mut() {
+        if task.status == "waiting" {
+            task.status = String::from("stopped");
+            data_for_db.push(StartAllData {
+                id: task.id,
+                status: String::from("stopped"),
+            });
+        }
+    }
+    update_batch_status(&data_for_db);
+
+    tasks.clone()
 }
 
 // WindowConfig https://docs.rs/tauri-utils/latest/tauri_utils/config/struct.WindowConfig.html
@@ -1027,8 +1142,8 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                                             &res.local,
                                             &current_data_json,
                                             &url,
-                                            &res.author,
-                                            &current_name,
+                                            &clean_string(&res.author),
+                                            &clean_string(&current_name),
                                             "0.00",
                                             res.current_count as i32,
                                             0 as i32,
@@ -1277,8 +1392,8 @@ pub fn add_new_task_juan_hua_fanwai(
             &res.local,
             &data_json,
             &url,
-            &res.author,
-            &res.comic_name,
+            &clean_string(&res.author),
+            &clean_string(&res.comic_name),
             "0.00",
             all_count,
             0 as i32,

@@ -380,3 +380,10 @@ pub async fn retry_request(url: &str, max_retries: u32) -> Result<String, reqwes
         }
     }
 }
+
+pub fn clean_string(input: &str) -> String {
+    input
+        .replace(" ", "_")
+        .replace(&['/', '\\'][..], "_")
+        .replace(&['!', '?'][..], "")
+}

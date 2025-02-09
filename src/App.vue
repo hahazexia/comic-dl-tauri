@@ -53,7 +53,10 @@ const del_task = ref<Tasks>({
   error_vec: "",
   done: false
 });
-const isModalOpen = ref(false);
+const deleteOneOpen = ref(false);
+const deleteAllOpen = ref(false);
+const errorInfoOpen = ref(false);
+const error_info = ref('');
 
 const task_downloading = computed(() => {
   return tasks_all.filter(task => task.status === 'downloading');
@@ -104,9 +107,9 @@ function calc_tasks_current(menu?: any) {
   sortTasks();
 }
 
-function deleteTask(data: any) {
+function deleteOneTask(data: any) {
   del_task.value = data;
-  openModal();
+  openDeleteOneModal();
 }
 
 function sortTasks() {
@@ -124,12 +127,34 @@ function sortTasks() {
   });
 }
 
-const openModal = () => {
-  isModalOpen.value = true;
+function showErrorInfo(data: any) {
+  error_info.value = data.error_vec;
+  errorInfoOpen.value = true;
+}
+function closeErrorInfoModal() {
+  errorInfoOpen.value = false;
+}
+
+const openDeleteOneModal = () => {
+  deleteOneOpen.value = true;
 };
 
-const closeModal = () => {
-  isModalOpen.value = false;
+const closeDeleteOneModal = () => {
+  deleteOneOpen.value = false;
+};
+const closeDeleteAllModal = () => {
+  deleteAllOpen.value = false;
+};
+const confirmDeleteAll = async () => {
+  let res: any = await invoke('delete_all');
+  tasks_current.splice(0);
+  tasks_all.splice(0);
+  tasks_all.push(...res);
+  tasks_current.push(...res);
+
+  sortTasks();
+
+  deleteAllOpen.value = false;
 };
 
 const startOrPause = async (data: any, status: string) => {
@@ -159,7 +184,7 @@ async function startTask(data: any, status: string) {
   await invoke("start_or_pause", { id: data.id, status: status, onEvent });
 }
 
-const confirmDelete = async () => {
+const confirmDeleteOne = async () => {
   let del_id = await invoke("delete_tasks", { id: del_task.value?.id });
   const index = tasks_all.findIndex(item => item.id === del_id);
   const index2 = tasks_current.findIndex(item => item.id === del_id);
@@ -168,7 +193,47 @@ const confirmDelete = async () => {
     tasks_current.splice(index2, 1);
   }
 
-  isModalOpen.value = false;
+  deleteOneOpen.value = false;
+};
+
+const startAll = async () => {
+  let res: any = await invoke('start_all');
+  console.log(res, 'start all res');
+  tasks_current.splice(0);
+  tasks_all.splice(0);
+  tasks_all.push(...res.tasks);
+  tasks_current.push(...res.tasks);
+
+  sortTasks();
+
+  for (let i of res.changed) {
+    if (i.status === 'downloading') {
+      startTask({ id: i.id }, 'downloading');
+    }
+  }
+};
+
+const pauseAll = async () => {
+  let res: any = await invoke('pause_all');
+  tasks_current.splice(0);
+  tasks_all.splice(0);
+  tasks_all.push(...res);
+  tasks_current.push(...res);
+
+  sortTasks();
+};
+const pauseAllWaiting = async () => {
+  let res: any = await invoke('pause_all_waiting');
+
+  tasks_current.splice(0);
+  tasks_all.splice(0);
+  tasks_all.push(...res);
+  tasks_current.push(...res);
+
+  sortTasks();
+};
+const deleteAll = async () => {
+  deleteAllOpen.value = true;
 };
 
 onMounted(() => {
@@ -255,6 +320,12 @@ onMounted(() => {
       <div class="add" title="create new task" @click="add"></div>
     </div>
     <div class="list">
+      <div class="list-tool">
+        <div class="list-tool-btn start-all" title="start all" @click="startAll"></div>
+        <div class="list-tool-btn pause-all" title="pause all" @click="pauseAll"></div>
+        <div class="list-tool-btn pause-all-waiting" title="pause all waiting" @click="pauseAllWaiting"></div>
+        <div class="list-tool-btn delete-all" title="delete all not downloading" @click="deleteAll"></div>
+      </div>
       <div class="list-item" v-for="data in tasks_current" :key="data.id">
         <div class="name" :class="{ 'downloading-name': data.status === 'downloading' }"
           v-text="`${data.comic_name}_${dl_type_map[data.dl_type]}`"
@@ -282,17 +353,32 @@ onMounted(() => {
             }"
               @click="() => startOrPause(data, (data.status === 'downloading' || data.status === 'waiting') ? 'stopped' : 'downloading')">
             </div>
-            <div class="delete" @click="() => deleteTask(data)"></div>
+            <div class="delete" @click="() => deleteOneTask(data)"></div>
+            <div v-if="data.error_vec.length > 2" class="error-info" @click="() => showErrorInfo(data)"></div>
           </div>
         </div>
       </div>
+      <div class="no-task" v-if="!tasks_current || tasks_current?.length === 0">No task found</div>
     </div>
-    <dialog class="delete-dialog" :open="isModalOpen" @close="isModalOpen = false">
-      <div class="delete-title" v-text="`Confirm delete this task?`"></div>
-      <p class="delete-item" v-text="`${del_task?.comic_name} ${del_task?.dl_type}`"></p>
+    <dialog class="delete-dialog" :open="deleteOneOpen" @close="deleteOneOpen = false">
+      <div class="delete-title" v-text="`Delete this task?`"></div>
+      <p class="delete-item" v-text="`${del_task?.comic_name}_${dl_type_map?.[del_task?.dl_type]}`"></p>
       <div class="delete-operation">
-        <button class="delete-btn" @click="confirmDelete">confirm</button>
-        <button class="delete-btn" @click="closeModal">cancel</button>
+        <button class="delete-btn" @click="confirmDeleteOne">confirm</button>
+        <button class="delete-btn" @click="closeDeleteOneModal">cancel</button>
+      </div>
+    </dialog>
+    <dialog class="delete-dialog" :open="deleteAllOpen" @close="deleteAllOpen = false">
+      <div class="delete-title" v-text="`Delete all not downloading task?`"></div>
+      <div class="delete-operation">
+        <button class="delete-btn" @click="confirmDeleteAll">confirm</button>
+        <button class="delete-btn" @click="closeDeleteAllModal">cancel</button>
+      </div>
+    </dialog>
+    <dialog class="error-info-dialog" :open="errorInfoOpen" @close="errorInfoOpen = false">
+      <div class="info" v-text="error_info"></div>
+      <div class="delete-operation">
+        <button class="delete-btn" @click="closeErrorInfoModal">cancel</button>
       </div>
     </dialog>
   </div>
@@ -313,7 +399,7 @@ onMounted(() => {
 
     .add {
       cursor: pointer;
-      background-image: url('./img/add.png');
+      background-image: url('./img/add.svg');
       background-repeat: no-repeat;
       background-size: contain;
       width: 20px;
@@ -329,7 +415,7 @@ onMounted(() => {
       align-items: center;
       position: relative;
       cursor: pointer;
-      font-size: 16px;
+      font-size: 12px;
       color: #212121;
       line-height: 50px;
       padding-left: 40px;
@@ -348,12 +434,37 @@ onMounted(() => {
         transform: translateY(-50%);
       }
 
+      &.all::before {
+        background-image: url('./img/all.svg');
+      }
+
+      &.downloading::before {
+        background-image: url('./img/download.svg');
+      }
+
+      &.waiting::before {
+        background-image: url('./img/wait.svg');
+      }
+
+      &.finished::before {
+        background-image: url('./img/ok.svg');
+      }
+
+      &.stopped::before {
+        background-image: url('./img/stop.svg');
+      }
+
+      &.failed::before {
+        background-image: url('./img/failed.svg');
+      }
+
       &.active {
         background-color: #F5F5F5;
       }
 
       &:hover {
         background-color: #F5F5F5;
+        filter: hue-rotate(180deg) brightness(0.8) saturate(2);
       }
 
       .num {
@@ -361,33 +472,57 @@ onMounted(() => {
         color: #5D5D5D;
       }
     }
-
-    .all::before {
-      background-image: url('./img/all.png');
-    }
-
-    .downloading::before {
-      background-image: url('./img/download.png');
-    }
-
-    .waiting::before {
-      background-image: url('./img/wait.png');
-    }
-
-    .finished::before {
-      background-image: url('./img/ok.png');
-    }
-
-    .stopped::before {
-      background-image: url('./img/stop.png');
-    }
-
-    .failed::before {
-      background-image: url('./img/failed.png');
-    }
   }
 
   .list {
+    .no-task {
+      padding: 10px;
+      font-size: 12px;
+    }
+
+    .list-tool {
+      position: fixed;
+      width: 100%;
+      top: 0;
+      left: 201px;
+      padding: 0px 10px;
+      display: flex;
+      background-color: #fff;
+      z-index: 2;
+      border-bottom: 1px solid #CECECE;
+
+      .list-tool-btn {
+        cursor: pointer;
+        margin-left: 10px;
+        font-size: 12px;
+        width: 20px;
+        height: 20px;
+        background-repeat: no-repeat;
+        background-size: contain;
+
+        &:hover {
+          filter: hue-rotate(180deg) brightness(0.8) saturate(2);
+        }
+
+        &.start-all {
+          background-image: url('./img/start.svg');
+        }
+
+        &.pause-all {
+          background-image: url('./img/pause.svg');
+        }
+
+        &.pause-all-waiting {
+          background-image: url('./img/pause2.svg');
+        }
+
+        &.delete-all {
+          background-image: url('./img/delete.svg');
+        }
+      }
+    }
+
+    padding-top: 40px;
     max-height: 100%;
     overflow-y: auto;
     flex: 1;
@@ -401,7 +536,7 @@ onMounted(() => {
       }
 
       .name {
-        font-size: 16px;
+        font-size: 12px;
         font-weight: bold;
         display: -webkit-box;
         -webkit-box-orient: vertical;
@@ -439,23 +574,23 @@ onMounted(() => {
         }
 
         .downloading::before {
-          background-image: url('./img/download.png');
+          background-image: url('./img/download.svg');
         }
 
         .waiting::before {
-          background-image: url('./img/wait.png');
+          background-image: url('./img/wait.svg');
         }
 
         .finished::before {
-          background-image: url('./img/ok.png');
+          background-image: url('./img/ok.svg');
         }
 
         .stopped::before {
-          background-image: url('./img/stop.png');
+          background-image: url('./img/stop.svg');
         }
 
         .failed::before {
-          background-image: url('./img/failed.png');
+          background-image: url('./img/failed.svg');
         }
 
         .status,
@@ -505,7 +640,8 @@ onMounted(() => {
 
           .pause,
           .start,
-          .delete {
+          .delete,
+          .error-info {
             background-repeat: no-repeat;
             background-size: contain;
             width: 20px;
@@ -513,17 +649,58 @@ onMounted(() => {
             cursor: pointer;
           }
 
+          .error-info {
+            background-image: url('./img/info.svg');
+          }
+
           .pause {
-            background-image: url('./img/pause.png');
+            background-image: url('./img/pause.svg');
           }
 
           .start {
-            background-image: url('./img/start.png');
+            background-image: url('./img/start.svg');
           }
 
           .delete {
-            background-image: url('./img/delete.png');
+            background-image: url('./img/delete.svg');
           }
+        }
+      }
+    }
+  }
+
+  .error-info-dialog {
+    width: 400px;
+    height: 300px;
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 10px 10px 5px rgba($color: #575757, $alpha: 0.3);
+    border: 1px solid rgba($color: #7f7f7f, $alpha: 0.3);
+    padding-bottom: 14px;
+
+    .info {
+      width: 100%;
+      height: 100%;
+      font-size: 12px;
+      overflow-y: auto;
+    }
+
+    .delete-operation {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 14px;
+      display: flex;
+      justify-content: flex-end;
+
+      .delete-btn {
+        font-size: 12px;
+
+        &:hover {
+          color: #4872ac;
         }
       }
     }
@@ -540,14 +717,14 @@ onMounted(() => {
     border: 1px solid rgba($color: #7f7f7f, $alpha: 0.3);
 
     .delete-title {
-      font-size: 14px;
+      font-size: 12px;
       font-weight: bold;
     }
 
     .delete-item {
       font-size: 12px;
       font-weight: bold;
-      color: rgb(140, 65, 88);
+      color: rgb(130, 58, 79);
     }
 
     .delete-operation {
