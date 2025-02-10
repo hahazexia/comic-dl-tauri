@@ -12,6 +12,6 @@ comic-dl desktop app by tauri
 * Configure the download directory
 * Configure the number of concurrent tasks
 * Configure the number of concurrent image downloads
-* Button opening the cache directory
+* Button for opening the cache directory
 * About window to introduce the application and myself
 * Design an app logo

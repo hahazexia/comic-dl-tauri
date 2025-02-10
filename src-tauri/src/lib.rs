@@ -1355,7 +1355,11 @@ pub fn add_new_task_juan_hua_fanwai(
                 no_find = true;
             } else {
                 no_find = false;
-                info!("already has this task!");
+                info!(
+                    "already has this task: dl_type_divide: {} url: {}",
+                    &dl_type_divide, &url
+                );
+                // info!("add_new_task_juan_hua_fanwai alread has: {:?}", &data);
                 app.emit_to("main", "info_msg_main", "already has this task!")
                     .unwrap();
                 app.emit_to("main", "info_msg_add", "already has this task!")

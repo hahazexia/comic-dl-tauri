@@ -103,6 +103,9 @@ function calc_tasks_current(menu?: any) {
     case 'failed':
       tasks_current.push(...task_failed.value);
       break;
+    case 'waiting':
+      tasks_current.push(...task_waiting.value);
+      break;
   }
   sortTasks();
 }

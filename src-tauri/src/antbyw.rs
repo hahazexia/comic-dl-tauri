@@ -118,15 +118,16 @@ pub async fn handle_html(url: String, dl_type: String, app: &AppHandle) -> Handl
 pub async fn handle_author_html(url: String, app: &AppHandle) -> HandleHtmlRes {
     // 获取作者页zz_name
     let zz_name = get_url_query(url.clone(), String::from("zz_name"));
+    let page = get_url_query(url.clone(), String::from("page"));
 
     let home_dir = home::home_dir().unwrap();
     let author_html_cache_path = home_dir.join(format!(
-        ".comic_dl_tauri/html_cache/antbyw_author_{}.htmlcache",
-        &zz_name
+        ".comic_dl_tauri/html_cache/antbyw_author_{}_{}.htmlcache",
+        &zz_name, &page,
     ));
     let author_json_cache_path = home_dir.join(format!(
-        ".comic_dl_tauri/json_cache/antbyw_author_{}.json",
-        &zz_name
+        ".comic_dl_tauri/json_cache/antbyw_author_{}_{}.json",
+        &zz_name, &page
     ));
 
     let mut json_data_from_read = Some(HandleHtmlRes::new());
@@ -191,7 +192,7 @@ pub async fn handle_author_html(url: String, app: &AppHandle) -> HandleHtmlRes {
         if let Err(e) = cache_html(&html_content, author_html_cache_path) {
             error!(
                 "cache {} failed: {}",
-                format!("antbyw_author_{}.htmlcache", &zz_name),
+                format!("antbyw_author_{}_{}.htmlcache", &zz_name, &page),
                 e
             );
         }
@@ -276,7 +277,7 @@ pub async fn handle_author_html(url: String, app: &AppHandle) -> HandleHtmlRes {
     if let Err(e) = save_to_json(&res, &author_json_cache_path.to_str().unwrap()) {
         error!(
             "cache author json {}: {} ",
-            format!("antbyw_author_{}.json", &zz_name),
+            format!("antbyw_author_{}_{}.json", &zz_name, &page),
             e,
         );
         return HandleHtmlRes {
