@@ -926,10 +926,10 @@ async fn get_tasks(_app: AppHandle) -> Vec<PartialDownloadTask> {
 #[tauri::command]
 async fn start_all(_app: AppHandle) -> StartAllRes {
     info!("start_all ");
-    let tasks = TASKS.read().unwrap();
+    let mut tasks = TASKS.write().unwrap();
     let mut count = 0;
     let mut data_for_db: Vec<StartAllData> = Vec::new();
-    for task in tasks.iter() {
+    for task in tasks.iter_mut() {
         if task.status == "downloading" {
             count += 1;
             continue;
@@ -939,7 +939,7 @@ async fn start_all(_app: AppHandle) -> StartAllRes {
                 task.status, task.id, count
             );
             if count >= 2 {
-                // task.status = String::from("waiting");
+                task.status = String::from("waiting");
                 data_for_db.push(StartAllData {
                     id: task.id,
                     status: String::from("waiting"),
