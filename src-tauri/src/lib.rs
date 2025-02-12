@@ -184,7 +184,7 @@ async fn download_single_image(
         //     // continue;
         // }
         count += 1;
-        let response_result = timeout(Duration::from_secs(20), reqwest::get(url.clone())).await;
+        let response_result = timeout(Duration::from_secs(10), reqwest::get(url.clone())).await;
 
         match response_result {
             Ok(Ok(response)) => {
@@ -202,15 +202,18 @@ async fn download_single_image(
                     }
                     break;
                 } else {
+                    error!("download_single_image response status failed");
                     res = Bytes::from("");
                     *err_counts.entry(&messages[0]).or_insert(0) += 1;
                 }
             }
             Ok(Err(_e)) => {
+                error!("download_single_image err: {}", _e);
                 res = Bytes::from("");
                 *err_counts.entry(&messages[1]).or_insert(0) += 1;
             }
-            Err(_) => {
+            Err(e) => {
+                error!("download_single_image err: {}", e);
                 res = Bytes::from("");
                 *err_counts.entry(&messages[2]).or_insert(0) += 1;
             }
@@ -342,6 +345,10 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
     let home_dir = home::home_dir().unwrap();
     let comic_basic_path = home_dir.join(format!(".comic_dl_tauri/download/"));
     let downloading_count = get_downloading_count();
+    info!(
+        "start_or_pause downloading_count: {} status: {} id: {}",
+        downloading_count, status, id
+    );
     let final_status = if downloading_count >= 2 && status == "downloading" {
         String::from("waiting")
     } else {
@@ -487,7 +494,7 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                             // 保存进度到数据库
                                             let current_progress = *progress.lock().unwrap();
 
-                                            info!("current_progress: {}", current_progress);
+                                            // info!("current_progress: {}", current_progress);
                                             let progress_str = format!(
                                                 "{:.2}",
                                                 ((current_progress as f32) / (total as f32)
@@ -733,7 +740,7 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                         // 保存进度到数据库
                                         let current_progress = *progress.lock().unwrap();
 
-                                        info!("current current_progress: {}", current_progress);
+                                        // info!("current current_progress: {}", current_progress);
                                         let progress_str = format!(
                                             "{:.2}",
                                             ((current_progress as f32) / (total as f32) * 100.00)
@@ -919,10 +926,10 @@ async fn get_tasks(_app: AppHandle) -> Vec<PartialDownloadTask> {
 #[tauri::command]
 async fn start_all(_app: AppHandle) -> StartAllRes {
     info!("start_all ");
-    let mut tasks = TASKS.write().unwrap();
+    let tasks = TASKS.read().unwrap();
     let mut count = 0;
     let mut data_for_db: Vec<StartAllData> = Vec::new();
-    for task in tasks.iter_mut() {
+    for task in tasks.iter() {
         if task.status == "downloading" {
             count += 1;
             continue;
@@ -932,13 +939,13 @@ async fn start_all(_app: AppHandle) -> StartAllRes {
                 task.status, task.id, count
             );
             if count >= 2 {
-                task.status = String::from("waiting");
+                // task.status = String::from("waiting");
                 data_for_db.push(StartAllData {
                     id: task.id,
                     status: String::from("waiting"),
                 });
             } else {
-                task.status = String::from("downloading");
+                // task.status = String::from("downloading");
                 data_for_db.push(StartAllData {
                     id: task.id,
                     status: String::from("downloading"),
