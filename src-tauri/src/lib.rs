@@ -169,20 +169,6 @@ async fn download_single_image(
     let mut res;
 
     loop {
-        // let current_status = {
-        //     let tasks = TASKS.read().unwrap();
-        //     let target = tasks.iter().find(|x| x.id == id).unwrap();
-        //     target.status.clone()
-        // };
-        // if current_status == "stopped" {
-        //     return DownloadResult {
-        //         group_index,
-        //         index,
-        //         error_msg: String::from("stopped"),
-        //     };
-        //     // tokio::time::sleep(Duration::from_secs(1)).await;
-        //     // continue;
-        // }
         count += 1;
         let response_result = timeout(Duration::from_secs(10), reqwest::get(url.clone())).await;
 
@@ -334,11 +320,12 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
         }
 
         let _update_res = update_download_task_status(id, &status);
-        app.emit(
-            "task_status",
-            HashMap::from([("id", id.to_string()), ("status", String::from("stopped"))]),
-        )
-        .unwrap();
+        let _ = &app
+            .emit(
+                "task_status",
+                HashMap::from([("id", id.to_string()), ("status", String::from("stopped"))]),
+            )
+            .unwrap();
         return;
     }
 
@@ -372,11 +359,12 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
         let update_res = update_download_task_status(id, &final_status);
         if update_res.is_ok() {
             info!("update task status success: {}", id);
-            app.emit(
-                "task_status",
-                HashMap::from([("id", id.to_string()), ("status", final_status.clone())]),
-            )
-            .unwrap();
+            let _ = &app
+                .emit(
+                    "task_status",
+                    HashMap::from([("id", id.to_string()), ("status", final_status.clone())]),
+                )
+                .unwrap();
             if final_status == "downloading" {
                 let complete_current_task: DownloadTask = get_download_task(id).unwrap();
                 let all_count = complete_current_task.count;
@@ -390,8 +378,14 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                     let semaphore = Arc::new(Semaphore::new(20));
                     let total = all_count;
                     let progress = Arc::new(Mutex::new(0));
+                    let thread_error_msg = format!(
+                        "The child thread crashed: id: {} comic_name: {} dl_type: {}",
+                        &complete_current_task.id,
+                        &complete_current_task.comic_name,
+                        &complete_current_task.dl_type,
+                    );
 
-                    thread::spawn(move || {
+                    let thread_handle = thread::spawn(move || {
                         tokio::runtime::Builder::new_multi_thread()
                             .enable_all()
                             .build()
@@ -661,16 +655,29 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                         sort_tasks();
                                     }
                                 }
-                                start_waiting(&app);
                             });
                     });
+
+                    let result = thread_handle.join();
+                    if result.is_err() {
+                        error!("{}", &thread_error_msg);
+                        let _ = &app.emit("err_msg_main", &thread_error_msg).unwrap();
+                    } else {
+                        start_waiting(&app);
+                    }
                 } else if current_task_temp.dl_type == "current" {
                     let cache_json: Vec<Img> = serde_json::from_str(&cache_json_str).unwrap();
                     let semaphore = Arc::new(Semaphore::new(20));
                     let total = all_count;
                     let progress = Arc::new(Mutex::new(0));
+                    let thread_error_msg = format!(
+                        "The child thread crashed: id: {} comic_name: {} dl_type: {}",
+                        &current_task_temp.id,
+                        &current_task_temp.comic_name,
+                        &current_task_temp.dl_type,
+                    );
 
-                    thread::spawn(move || {
+                    let thread_handle = thread::spawn(move || {
                         tokio::runtime::Builder::new_multi_thread()
                             .enable_all()
                             .build()
@@ -899,10 +906,16 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                         sort_tasks();
                                     }
                                 }
-
-                                start_waiting(&app);
                             });
                     });
+
+                    let result = thread_handle.join();
+                    if result.is_err() {
+                        error!("{}", &thread_error_msg);
+                        let _ = &app.emit("err_msg_main", &thread_error_msg).unwrap();
+                    } else {
+                        start_waiting(&app);
+                    }
                 }
             }
         } else {
@@ -910,7 +923,8 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                 "update task status failed: {}, status: {}",
                 id, &final_status
             );
-            app.emit("info_msg_main", "update task status failed")
+            let _ = &app
+                .emit("info_msg_main", "update task status failed")
                 .unwrap();
         }
     }
