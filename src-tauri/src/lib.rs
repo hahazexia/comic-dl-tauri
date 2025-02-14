@@ -556,18 +556,19 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
                                     ((current_progress as f32) / (total as f32) * 100.00)
                                 );
 
-                                &app.emit(
-                                    "progress",
-                                    DownloadEvent {
-                                        id: complete_current_task.id,
-                                        progress: progress_str.clone(),
-                                        count: total,
-                                        now_count: current_progress as i32,
-                                        error_vec: String::from(""),
-                                        status: String::from("downloading"),
-                                    },
-                                )
-                                .unwrap();
+                                let _ = &app
+                                    .emit(
+                                        "progress",
+                                        DownloadEvent {
+                                            id: complete_current_task.id,
+                                            progress: progress_str.clone(),
+                                            count: total,
+                                            now_count: current_progress as i32,
+                                            error_vec: String::from(""),
+                                            status: String::from("downloading"),
+                                        },
+                                    )
+                                    .unwrap();
 
                                 if let Err(e) = update_download_task_progress(
                                     complete_current_task.id,
@@ -600,20 +601,20 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
                                 }
                                 if !error_vec.is_empty() {
                                     error!("Final result error: {:?}", &error_vec);
-
-                                    &app.emit(
-                                        "progress",
-                                        DownloadEvent {
-                                            id: complete_current_task.id,
-                                            progress: progress_str.clone(),
-                                            count: total,
-                                            now_count: current_progress as i32,
-                                            error_vec: serde_json::to_string_pretty(&error_vec)
-                                                .unwrap(),
-                                            status: String::from("failed"),
-                                        },
-                                    )
-                                    .unwrap();
+                                    let _ = &app
+                                        .emit(
+                                            "progress",
+                                            DownloadEvent {
+                                                id: complete_current_task.id,
+                                                progress: progress_str.clone(),
+                                                count: total,
+                                                now_count: current_progress as i32,
+                                                error_vec: serde_json::to_string_pretty(&error_vec)
+                                                    .unwrap(),
+                                                status: String::from("failed"),
+                                            },
+                                        )
+                                        .unwrap();
                                     if let Err(e) = update_download_task_error_vec(
                                         complete_current_task.id,
                                         serde_json::to_string_pretty(&error_vec).unwrap().as_str(),
@@ -641,19 +642,20 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
                                     } else {
                                         String::from("stopped")
                                     };
-                                    &app.emit(
-                                        "progress",
-                                        DownloadEvent {
-                                            id: complete_current_task.id,
-                                            progress: progress_str.clone(),
-                                            count: total,
-                                            now_count: current_progress as i32,
-                                            error_vec: serde_json::to_string_pretty(&error_vec)
-                                                .unwrap(),
-                                            status: sync_status.clone(),
-                                        },
-                                    )
-                                    .unwrap();
+                                    let _ = &app
+                                        .emit(
+                                            "progress",
+                                            DownloadEvent {
+                                                id: complete_current_task.id,
+                                                progress: progress_str.clone(),
+                                                count: total,
+                                                now_count: current_progress as i32,
+                                                error_vec: serde_json::to_string_pretty(&error_vec)
+                                                    .unwrap(),
+                                                status: sync_status.clone(),
+                                            },
+                                        )
+                                        .unwrap();
                                     if let Err(e) = update_download_task_error_vec(
                                         complete_current_task.id,
                                         serde_json::to_string_pretty(&error_vec).unwrap().as_str(),
@@ -828,18 +830,19 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
                                     ((current_progress as f32) / (total as f32) * 100.00)
                                 );
 
-                                &app.emit(
-                                    "progress",
-                                    DownloadEvent {
-                                        id: complete_current_task.id,
-                                        progress: progress_str.clone(),
-                                        count: total,
-                                        now_count: current_progress as i32,
-                                        error_vec: String::from(""),
-                                        status: String::from("downloading"),
-                                    },
-                                )
-                                .unwrap();
+                                let _ = &app
+                                    .emit(
+                                        "progress",
+                                        DownloadEvent {
+                                            id: complete_current_task.id,
+                                            progress: progress_str.clone(),
+                                            count: total,
+                                            now_count: current_progress as i32,
+                                            error_vec: String::from(""),
+                                            status: String::from("downloading"),
+                                        },
+                                    )
+                                    .unwrap();
 
                                 if let Err(e) = update_download_task_progress(
                                     complete_current_task.id,
@@ -869,19 +872,20 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
                                 if !error_vec.is_empty() {
                                     error!("current Final result error: {:?}", &error_vec);
 
-                                    &app.emit(
-                                        "progress",
-                                        DownloadEvent {
-                                            id: complete_current_task.id,
-                                            progress: progress_str.clone(),
-                                            count: total,
-                                            now_count: current_progress as i32,
-                                            error_vec: serde_json::to_string_pretty(&error_vec)
-                                                .unwrap(),
-                                            status: String::from("failed"),
-                                        },
-                                    )
-                                    .unwrap();
+                                    let _ = &app
+                                        .emit(
+                                            "progress",
+                                            DownloadEvent {
+                                                id: complete_current_task.id,
+                                                progress: progress_str.clone(),
+                                                count: total,
+                                                now_count: current_progress as i32,
+                                                error_vec: serde_json::to_string_pretty(&error_vec)
+                                                    .unwrap(),
+                                                status: String::from("failed"),
+                                            },
+                                        )
+                                        .unwrap();
                                     if let Err(e) = update_download_task_error_vec(
                                         complete_current_task.id,
                                         serde_json::to_string_pretty(&error_vec).unwrap().as_str(),
@@ -909,19 +913,20 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
                                     } else {
                                         String::from("stopped")
                                     };
-                                    &app.emit(
-                                        "progress",
-                                        DownloadEvent {
-                                            id: complete_current_task.id,
-                                            progress: progress_str.clone(),
-                                            count: total,
-                                            now_count: current_progress as i32,
-                                            error_vec: serde_json::to_string_pretty(&error_vec)
-                                                .unwrap(),
-                                            status: sync_status.clone(),
-                                        },
-                                    )
-                                    .unwrap();
+                                    let _ = &app
+                                        .emit(
+                                            "progress",
+                                            DownloadEvent {
+                                                id: complete_current_task.id,
+                                                progress: progress_str.clone(),
+                                                count: total,
+                                                now_count: current_progress as i32,
+                                                error_vec: serde_json::to_string_pretty(&error_vec)
+                                                    .unwrap(),
+                                                status: sync_status.clone(),
+                                            },
+                                        )
+                                        .unwrap();
                                     if let Err(e) = update_download_task_error_vec(
                                         complete_current_task.id,
                                         serde_json::to_string_pretty(&error_vec).unwrap().as_str(),
