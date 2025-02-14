@@ -28,9 +28,9 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock};
 use std::thread;
-use tauri::{ipc::Channel, AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Semaphore;
 use tokio::task::{AbortHandle, JoinSet};
 use tokio::time::{timeout, Duration};
@@ -38,6 +38,8 @@ use utils::{clean_string, create_cache_dir, get_second_level_domain, read_from_j
 
 pub static TASKS: LazyLock<QueuedRwLock<Vec<PartialDownloadTask>>> =
     LazyLock::new(|| QueuedRwLock::new(Vec::new()));
+pub static APP_HANDLE: LazyLock<QueuedRwLock<Option<AppHandle>>> =
+    LazyLock::new(|| QueuedRwLock::new(None));
 #[derive(Debug, Clone)]
 pub struct DownloadResult {
     group_index: usize,
@@ -112,6 +114,9 @@ pub fn run() {
                     }
                 }
             }
+            let app_handle = app.handle();
+            let mut app_lock = APP_HANDLE.write();
+            *app_lock = Some(app_handle.clone());
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
@@ -157,8 +162,8 @@ async fn download_single_image(
         Ok(permit) => permit,
         Err(_) => {
             let error_msg = format!(
-                "Failed to acquire semaphore for save_path: {} group: {} index: {}",
-                &save_path, group_index, index
+                "Failed to acquire semaphore for id: {} save_path: {} group: {} index: {}",
+                id, &save_path, group_index, index
             );
             return DownloadResult {
                 group_index,
@@ -192,18 +197,18 @@ async fn download_single_image(
                     }
                     break;
                 } else {
-                    error!("download_single_image response status failed");
+                    error!("download_single_image response status failed id: {}", id);
                     res = Bytes::from("");
                     *err_counts.entry(&messages[0]).or_insert(0) += 1;
                 }
             }
             Ok(Err(_e)) => {
-                error!("download_single_image err: {}", _e);
+                error!("download_single_image id: {} err: {}", id, _e);
                 res = Bytes::from("");
                 *err_counts.entry(&messages[1]).or_insert(0) += 1;
             }
             Err(e) => {
-                error!("download_single_image err: {}", e);
+                error!("download_single_image id: {} err: {}", id, e);
                 res = Bytes::from("");
                 *err_counts.entry(&messages[2]).or_insert(0) += 1;
             }
@@ -219,8 +224,8 @@ async fn download_single_image(
     let mut error_msg = String::from("");
     if res.is_empty() {
         let mut error_str = format!(
-            "download img failed: save_path: {} group_index: {} index: {}",
-            &save_path, group_index, index
+            "download img failed: id: {} save_path: {} group_index: {} index: {}",
+            id, &save_path, group_index, index
         );
         for (msg, index) in err_counts {
             error_str.push_str(&format!(" {}: {}", msg, index));
@@ -233,20 +238,20 @@ async fn download_single_image(
             if let Ok(mut output_file) = File::create(PathBuf::from(&save_path)) {
                 if let Err(e) = jpg_bytes.write_to(&mut output_file, ImageFormat::Jpeg) {
                     error_msg = format!(
-                        "Failed to write image to file for save_path: {} group: {} index: {} e: {}",
-                        &save_path, group_index, index, e
+                        "Failed to write image to file for id: {} save_path: {} group: {} index: {} e: {}",
+                        id, &save_path, group_index, index, e
                     );
                 }
             } else {
                 error_msg = format!(
-                    "Failed to create file for save_path: {} group: {} index: {}",
-                    &save_path, group_index, index
+                    "Failed to create file for id: {} save_path: {} group: {} index: {}",
+                    id, &save_path, group_index, index
                 );
             }
         } else {
             error_msg = format!(
-                "Failed to load image from memory for save_path: {} group: {} index: {}",
-                &save_path, group_index, index
+                "Failed to load image from memory for id: {} save_path: {} group: {} index: {}",
+                id, &save_path, group_index, index
             );
         }
 
@@ -314,7 +319,7 @@ fn start_waiting(app: &AppHandle) {
 }
 
 #[tauri::command]
-async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Channel<DownloadEvent>) {
+async fn start_or_pause(app: AppHandle, id: i32, status: String) {
     if status == "stopped" {
         let mut tasks = TASKS.write();
         for task in tasks.iter_mut() {
@@ -499,18 +504,24 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                                     * 100.00)
                                             );
 
-                                            let event_res = on_event.send(DownloadEvent {
-                                                id: complete_current_task.id,
-                                                progress: progress_str.clone(),
-                                                count: total,
-                                                now_count: current_progress as i32,
-                                                error_vec: String::from(""),
-                                                status: String::from("downloading"),
-                                            });
+                                            let event_res = &app.emit(
+                                                "progress",
+                                                DownloadEvent {
+                                                    id: complete_current_task.id,
+                                                    progress: progress_str.clone(),
+                                                    count: total,
+                                                    now_count: current_progress as i32,
+                                                    error_vec: String::from(""),
+                                                    status: String::from("downloading"),
+                                                },
+                                            );
                                             match event_res {
                                                 Ok(_s) => {}
                                                 Err(e) => {
-                                                    error!("on_event failed: {}", e);
+                                                    error!(
+                                                        "progress on_event failed: {} id: {}",
+                                                        e, id
+                                                    );
                                                 }
                                             }
 
@@ -545,16 +556,18 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                     ((current_progress as f32) / (total as f32) * 100.00)
                                 );
 
-                                on_event
-                                    .send(DownloadEvent {
+                                &app.emit(
+                                    "progress",
+                                    DownloadEvent {
                                         id: complete_current_task.id,
                                         progress: progress_str.clone(),
                                         count: total,
                                         now_count: current_progress as i32,
                                         error_vec: String::from(""),
                                         status: String::from("downloading"),
-                                    })
-                                    .unwrap();
+                                    },
+                                )
+                                .unwrap();
 
                                 if let Err(e) = update_download_task_progress(
                                     complete_current_task.id,
@@ -588,8 +601,9 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                 if !error_vec.is_empty() {
                                     error!("Final result error: {:?}", &error_vec);
 
-                                    on_event
-                                        .send(DownloadEvent {
+                                    &app.emit(
+                                        "progress",
+                                        DownloadEvent {
                                             id: complete_current_task.id,
                                             progress: progress_str.clone(),
                                             count: total,
@@ -597,8 +611,9 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                             error_vec: serde_json::to_string_pretty(&error_vec)
                                                 .unwrap(),
                                             status: String::from("failed"),
-                                        })
-                                        .unwrap();
+                                        },
+                                    )
+                                    .unwrap();
                                     if let Err(e) = update_download_task_error_vec(
                                         complete_current_task.id,
                                         serde_json::to_string_pretty(&error_vec).unwrap().as_str(),
@@ -626,8 +641,9 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                     } else {
                                         String::from("stopped")
                                     };
-                                    on_event
-                                        .send(DownloadEvent {
+                                    &app.emit(
+                                        "progress",
+                                        DownloadEvent {
                                             id: complete_current_task.id,
                                             progress: progress_str.clone(),
                                             count: total,
@@ -635,8 +651,9 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                             error_vec: serde_json::to_string_pretty(&error_vec)
                                                 .unwrap(),
                                             status: sync_status.clone(),
-                                        })
-                                        .unwrap();
+                                        },
+                                    )
+                                    .unwrap();
                                     if let Err(e) = update_download_task_error_vec(
                                         complete_current_task.id,
                                         serde_json::to_string_pretty(&error_vec).unwrap().as_str(),
@@ -664,10 +681,18 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
 
                     let result = thread_handle.join();
                     if result.is_err() {
-                        error!("{}", &thread_error_msg);
-                        let _ = &app.emit("err_msg_main", &thread_error_msg).unwrap();
+                        error!("thread_error_msg: {}", &thread_error_msg);
+
+                        let app_lock = APP_HANDLE.read().clone();
+                        if let Some(app) = app_lock {
+                            let _ = &app.emit("err_msg_main", &thread_error_msg).unwrap();
+                        }
                     } else {
-                        start_waiting(&app);
+                        info!("id: {} thread finished", id);
+                        let app_lock = APP_HANDLE.read().clone();
+                        if let Some(app) = app_lock {
+                            start_waiting(&app);
+                        }
                     }
                 } else if current_task_temp.dl_type == "current" {
                     let cache_json: Vec<Img> = serde_json::from_str(&cache_json_str).unwrap();
@@ -757,14 +782,17 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                             ((current_progress as f32) / (total as f32) * 100.00)
                                         );
 
-                                        let event_res = on_event.send(DownloadEvent {
-                                            id: complete_current_task.id,
-                                            progress: progress_str.clone(),
-                                            count: total,
-                                            now_count: current_progress as i32,
-                                            error_vec: String::from(""),
-                                            status: String::from("downloading"),
-                                        });
+                                        let event_res = &app.emit(
+                                            "progress",
+                                            DownloadEvent {
+                                                id: complete_current_task.id,
+                                                progress: progress_str.clone(),
+                                                count: total,
+                                                now_count: current_progress as i32,
+                                                error_vec: String::from(""),
+                                                status: String::from("downloading"),
+                                            },
+                                        );
                                         match event_res {
                                             Ok(_s) => {}
                                             Err(e) => {
@@ -800,16 +828,18 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                     ((current_progress as f32) / (total as f32) * 100.00)
                                 );
 
-                                on_event
-                                    .send(DownloadEvent {
+                                &app.emit(
+                                    "progress",
+                                    DownloadEvent {
                                         id: complete_current_task.id,
                                         progress: progress_str.clone(),
                                         count: total,
                                         now_count: current_progress as i32,
                                         error_vec: String::from(""),
                                         status: String::from("downloading"),
-                                    })
-                                    .unwrap();
+                                    },
+                                )
+                                .unwrap();
 
                                 if let Err(e) = update_download_task_progress(
                                     complete_current_task.id,
@@ -839,8 +869,9 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                 if !error_vec.is_empty() {
                                     error!("current Final result error: {:?}", &error_vec);
 
-                                    on_event
-                                        .send(DownloadEvent {
+                                    &app.emit(
+                                        "progress",
+                                        DownloadEvent {
                                             id: complete_current_task.id,
                                             progress: progress_str.clone(),
                                             count: total,
@@ -848,8 +879,9 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                             error_vec: serde_json::to_string_pretty(&error_vec)
                                                 .unwrap(),
                                             status: String::from("failed"),
-                                        })
-                                        .unwrap();
+                                        },
+                                    )
+                                    .unwrap();
                                     if let Err(e) = update_download_task_error_vec(
                                         complete_current_task.id,
                                         serde_json::to_string_pretty(&error_vec).unwrap().as_str(),
@@ -877,8 +909,9 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                     } else {
                                         String::from("stopped")
                                     };
-                                    on_event
-                                        .send(DownloadEvent {
+                                    &app.emit(
+                                        "progress",
+                                        DownloadEvent {
                                             id: complete_current_task.id,
                                             progress: progress_str.clone(),
                                             count: total,
@@ -886,8 +919,9 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
                                             error_vec: serde_json::to_string_pretty(&error_vec)
                                                 .unwrap(),
                                             status: sync_status.clone(),
-                                        })
-                                        .unwrap();
+                                        },
+                                    )
+                                    .unwrap();
                                     if let Err(e) = update_download_task_error_vec(
                                         complete_current_task.id,
                                         serde_json::to_string_pretty(&error_vec).unwrap().as_str(),
@@ -915,10 +949,17 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String, on_event: Chann
 
                     let result = thread_handle.join();
                     if result.is_err() {
-                        error!("{}", &thread_error_msg);
-                        let _ = &app.emit("err_msg_main", &thread_error_msg).unwrap();
+                        error!("thread_error_msg: {}", &thread_error_msg);
+                        let app_lock = APP_HANDLE.read().clone();
+                        if let Some(app) = app_lock {
+                            let _ = &app.emit("err_msg_main", &thread_error_msg).unwrap();
+                        }
                     } else {
-                        start_waiting(&app);
+                        info!("id: {} thread finished", id);
+                        let app_lock = APP_HANDLE.read().clone();
+                        if let Some(app) = app_lock {
+                            start_waiting(&app);
+                        }
                     }
                 }
             }

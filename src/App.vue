@@ -166,25 +166,7 @@ const startOrPause = async (data: any, status: string) => {
 };
 
 async function startTask(data: any, status: string) {
-  const onEvent = new Channel<DownloadEvent>();
-  onEvent.onmessage = (message: any) => {
-    const index = tasks_all.findIndex(item => item.id === message.id);
-    const index2 = tasks_current.findIndex(item => item.id === message.id);
-
-    tasks_all[index].progress = message.progress;
-    tasks_all[index].now_count = message.now_count;
-    tasks_all[index].error_vec = message.error_vec;
-    tasks_all[index].status = message.status;
-
-
-    tasks_current[index2].progress = message.progress;
-    tasks_current[index2].now_count = message.now_count;
-    tasks_current[index2].error_vec = message.error_vec;
-    tasks_current[index2].status = message.status;
-
-    sortTasks();
-  };
-  await invoke("start_or_pause", { id: data.id, status: status, onEvent });
+  await invoke("start_or_pause", { id: data.id, status: status });
 }
 
 const confirmDeleteOne = async () => {
@@ -254,6 +236,25 @@ onMounted(() => {
       type: 'info',
       autoClose: 2000,
     });
+  });
+
+  listen('progress', (e: any) => {
+    let message: DownloadEvent = e.payload;
+    const index = tasks_all.findIndex(item => item.id === message.id);
+    const index2 = tasks_current.findIndex(item => item.id === message.id);
+
+    tasks_all[index].progress = message.progress;
+    tasks_all[index].now_count = message.now_count;
+    tasks_all[index].error_vec = message.error_vec;
+    tasks_all[index].status = message.status;
+
+
+    tasks_current[index2].progress = message.progress;
+    tasks_current[index2].now_count = message.now_count;
+    tasks_current[index2].error_vec = message.error_vec;
+    tasks_current[index2].status = message.status;
+
+    sortTasks();
   });
 
   listen('new_task', (e: any) => {
