@@ -5,7 +5,7 @@ mod db;
 mod log_init;
 mod mangadex;
 pub mod models;
-mod queue_rwlock;
+// mod queue_rwlock;
 pub mod schema;
 mod utils;
 
@@ -22,13 +22,13 @@ use log::{error, info};
 use log_init::init_log;
 use mangadex::handle_mangadex;
 use models::{DownloadTask, PartialDownloadTask};
-use queue_rwlock::QueuedRwLock;
+// use queue_rwlock::QueuedRwLock;
 use reqwest;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::Semaphore;
@@ -36,10 +36,8 @@ use tokio::task::{spawn, AbortHandle, JoinSet};
 use tokio::time::{timeout, Duration};
 use utils::{clean_string, create_cache_dir, get_second_level_domain, read_from_json, StatusCode};
 
-pub static TASKS: LazyLock<QueuedRwLock<Vec<PartialDownloadTask>>> =
-    LazyLock::new(|| QueuedRwLock::new(Vec::new()));
-pub static APP_HANDLE: LazyLock<QueuedRwLock<Option<AppHandle>>> =
-    LazyLock::new(|| QueuedRwLock::new(None));
+pub static TASKS: RwLock<Vec<PartialDownloadTask>> = RwLock::new(Vec::new());
+pub static APP_HANDLE: LazyLock<RwLock<Option<AppHandle>>> = LazyLock::new(|| RwLock::new(None));
 #[derive(Debug, Clone)]
 pub struct DownloadResult {
     group_index: usize,
@@ -100,11 +98,11 @@ pub fn run() {
                     match db_res {
                         Ok(data) => {
                             {
-                                let mut tasks_guard = TASKS.write();
+                                let mut tasks_guard = TASKS.write().unwrap();
                                 *tasks_guard = data;
                             }
                             {
-                                let tasks_guard = TASKS.read();
+                                let tasks_guard = TASKS.read().unwrap();
                                 info!("Number of tasks: {}", (*tasks_guard).len());
                             }
                         }
@@ -115,7 +113,7 @@ pub fn run() {
                 }
             }
             let app_handle = app.handle();
-            let mut app_lock = APP_HANDLE.write();
+            let mut app_lock = APP_HANDLE.write().unwrap();
             *app_lock = Some(app_handle.clone());
             Ok(())
         })
@@ -142,10 +140,10 @@ async fn download_single_image(
     url: String,
     save_path: String,
     permit: OwnedSemaphorePermit,
-    progress: Arc<QueuedRwLock<u32>>,
+    progress: Arc<Mutex<u32>>,
 ) -> DownloadResult {
     let current_status = {
-        let tasks = TASKS.read();
+        let tasks = TASKS.read().unwrap();
         let target = tasks.iter().find(|x| x.id == id).unwrap();
         target.status.clone()
     };
@@ -204,7 +202,7 @@ async fn download_single_image(
             break;
         }
 
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        // tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
     let mut error_msg = String::from("");
@@ -243,7 +241,7 @@ async fn download_single_image(
 
         // 更新进度
         if error_msg.is_empty() {
-            let mut progress_lock = progress.write();
+            let mut progress_lock = progress.lock().unwrap();
             *progress_lock += 1;
         }
     }
@@ -257,7 +255,7 @@ async fn download_single_image(
 
 fn sort_tasks() {
     const STATUS_ORDER: [&str; 5] = ["downloading", "waiting", "stopped", "failed", "finished"];
-    let mut tasks = TASKS.write();
+    let mut tasks = TASKS.write().unwrap();
     tasks.sort_by_key(|x| {
         STATUS_ORDER
             .iter()
@@ -267,7 +265,7 @@ fn sort_tasks() {
 }
 
 fn get_downloading_count() -> i32 {
-    let tasks = TASKS.read();
+    let tasks = TASKS.read().unwrap();
     let mut count = 0;
     for task in tasks.iter() {
         if task.status == "downloading" {
@@ -287,7 +285,7 @@ fn start_waiting(app: &AppHandle) {
         // }
         let change_count = 2 - current_downloading;
         let mut modified_count = 0;
-        let tasks = TASKS.write();
+        let tasks = TASKS.write().unwrap();
         let mut changed_vec: Vec<i32> = Vec::new();
         for task in tasks.iter() {
             if task.status == "waiting" {
@@ -309,7 +307,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
     let cache_json_str = &complete_current_task.cache_json;
     let cache_json: Vec<CurrentElement> = serde_json::from_str(&cache_json_str).unwrap();
     let total = all_count;
-    let progress = Arc::new(QueuedRwLock::new(0));
+    let progress = Arc::new(Mutex::new(0));
 
     let home_dir = home::home_dir().unwrap();
     let comic_basic_path = home_dir.join(format!(".comic_dl_tauri/download/"));
@@ -321,11 +319,11 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
         let mut join_set = JoinSet::new();
         let mut group_save_counter = 0;
 
-        let semaphore = Arc::new(Semaphore::new(20));
+        let semaphore = Arc::new(Semaphore::new(10));
 
         for (i, url) in url_group.imgs.into_iter().enumerate() {
             if url.done {
-                let mut progress_lock = progress.write();
+                let mut progress_lock = progress.lock().unwrap();
                 *progress_lock += 1;
                 continue;
             }
@@ -373,7 +371,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
 
         while let Some(res) = join_set.join_next().await {
             let current_status = {
-                let tasks = TASKS.read();
+                let tasks = TASKS.read().unwrap();
                 let target = tasks
                     .iter()
                     .find(|x| x.id == complete_current_task.id)
@@ -403,7 +401,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
             group_save_counter += 1;
             if group_save_counter % 5 == 0 {
                 // 保存进度到数据库
-                let current_progress = *progress.read();
+                let current_progress = *progress.lock().unwrap();
 
                 // info!("current_progress: {}", current_progress);
                 let progress_str = format!(
@@ -411,7 +409,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
                     ((current_progress as f32) / (total as f32) * 100.00)
                 );
 
-                let app_lock = APP_HANDLE.read().clone();
+                let app_lock = APP_HANDLE.read().unwrap().clone();
                 if let Some(app) = app_lock {
                     let event_res = &app.emit(
                         "progress",
@@ -444,7 +442,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
                     error!("save progress to db failed: {}", e);
                 } else {
                     {
-                        let mut tasks = TASKS.write();
+                        let mut tasks = TASKS.write().unwrap();
                         if let Some(temp) =
                             tasks.iter_mut().find(|x| x.id == complete_current_task.id)
                         {
@@ -458,13 +456,13 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
         }
     }
     // 确保最后一次进度也保存到数据库
-    let current_progress = *progress.read();
+    let current_progress = *progress.lock().unwrap();
     let progress_str = format!(
         "{:.2}",
         ((current_progress as f32) / (total as f32) * 100.00)
     );
 
-    let app_lock = APP_HANDLE.read().clone();
+    let app_lock = APP_HANDLE.read().unwrap().clone();
     if let Some(app) = app_lock {
         let _ = &app
             .emit(
@@ -490,7 +488,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
         error!("save progress to db failed: {}", e);
     } else {
         {
-            let mut tasks = TASKS.write();
+            let mut tasks = TASKS.write().unwrap();
             if let Some(temp) = tasks.iter_mut().find(|x| x.id == complete_current_task.id) {
                 temp.progress = progress_str.clone();
                 temp.now_count = current_progress as i32;
@@ -508,7 +506,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
     }
     if !error_vec.is_empty() {
         error!("Final result error: {:?}", &error_vec);
-        let app_lock = APP_HANDLE.read().clone();
+        let app_lock = APP_HANDLE.read().unwrap().clone();
         if let Some(app) = app_lock {
             let _ = &app
                 .emit(
@@ -533,7 +531,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
             error!("save error_msg to db failed: {}", e);
         } else {
             {
-                let mut tasks = TASKS.write();
+                let mut tasks = TASKS.write().unwrap();
                 if let Some(temp) = tasks.iter_mut().find(|x| x.id == complete_current_task.id) {
                     temp.error_vec = serde_json::to_string_pretty(&error_vec).unwrap();
                     temp.status = String::from("failed");
@@ -548,7 +546,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
             String::from("stopped")
         };
 
-        let app_lock = APP_HANDLE.read().clone();
+        let app_lock = APP_HANDLE.read().unwrap().clone();
         if let Some(app) = app_lock {
             let _ = &app
                 .emit(
@@ -572,7 +570,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
             error!("save error_msg to db failed: {}", e);
         } else {
             {
-                let mut tasks = TASKS.write();
+                let mut tasks = TASKS.write().unwrap();
                 if let Some(temp) = tasks.iter_mut().find(|x| x.id == complete_current_task.id) {
                     temp.error_vec = serde_json::to_string_pretty(&error_vec).unwrap();
                     temp.status = sync_status.clone();
@@ -587,9 +585,9 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
     let all_count = complete_current_task.count;
     let cache_json_str = &complete_current_task.cache_json;
     let cache_json: Vec<Img> = serde_json::from_str(&cache_json_str).unwrap();
-    let semaphore = Arc::new(Semaphore::new(20));
+    let semaphore = Arc::new(Semaphore::new(10));
     let total = all_count;
-    let progress = Arc::new(QueuedRwLock::new(0));
+    let progress = Arc::new(Mutex::new(0));
     let mut all_results = Vec::new();
     let mut cache_json_sync = cache_json.clone();
     let mut group_handles = Vec::<AbortHandle>::new();
@@ -602,7 +600,7 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
 
     for (i, url) in cache_json.into_iter().enumerate() {
         if url.done {
-            let mut progress_lock = progress.write();
+            let mut progress_lock = progress.lock().unwrap();
             *progress_lock += 1;
             continue;
         }
@@ -631,7 +629,7 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
 
     while let Some(res) = join_set.join_next().await {
         let current_status = {
-            let tasks = TASKS.read();
+            let tasks = TASKS.read().unwrap();
             let target = tasks
                 .iter()
                 .find(|x| x.id == complete_current_task.id)
@@ -662,7 +660,7 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
         group_save_counter += 1;
         if group_save_counter % 5 == 0 {
             // 保存进度到数据库
-            let current_progress = *progress.read();
+            let current_progress = *progress.lock().unwrap();
 
             // info!("current current_progress: {}", current_progress);
             let progress_str = format!(
@@ -670,7 +668,7 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
                 ((current_progress as f32) / (total as f32) * 100.00)
             );
 
-            let app_lock = APP_HANDLE.read().clone();
+            let app_lock = APP_HANDLE.read().unwrap().clone();
             if let Some(app) = app_lock {
                 let event_res = &app.emit(
                     "progress",
@@ -699,7 +697,7 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
             ) {
                 error!("save current progress to db failed: {}", e);
             } else {
-                let mut tasks = TASKS.write();
+                let mut tasks = TASKS.write().unwrap();
                 if let Some(temp) = tasks.iter_mut().find(|x| x.id == complete_current_task.id) {
                     temp.progress = progress_str;
                     temp.now_count = current_progress as i32;
@@ -709,13 +707,13 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
     }
 
     // 确保最后一次进度也保存到数据库
-    let current_progress = *progress.read();
+    let current_progress = *progress.lock().unwrap();
     let progress_str = format!(
         "{:.2}",
         ((current_progress as f32) / (total as f32) * 100.00)
     );
 
-    let app_lock = APP_HANDLE.read().clone();
+    let app_lock = APP_HANDLE.read().unwrap().clone();
     if let Some(app) = app_lock {
         let _ = &app
             .emit(
@@ -740,7 +738,7 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
     ) {
         error!("save progress to db failed: {}", e);
     } else {
-        let mut tasks = TASKS.write();
+        let mut tasks = TASKS.write().unwrap();
         if let Some(temp) = tasks.iter_mut().find(|x| x.id == complete_current_task.id) {
             temp.progress = progress_str.clone();
             temp.now_count = current_progress as i32;
@@ -757,7 +755,7 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
     if !error_vec.is_empty() {
         error!("current Final result error: {:?}", &error_vec);
 
-        let app_lock = APP_HANDLE.read().clone();
+        let app_lock = APP_HANDLE.read().unwrap().clone();
         if let Some(app) = app_lock {
             let _ = &app
                 .emit(
@@ -781,7 +779,7 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
             error!("save error_msg to db failed: {}", e);
         } else {
             {
-                let mut tasks = TASKS.write();
+                let mut tasks = TASKS.write().unwrap();
                 if let Some(temp) = tasks.iter_mut().find(|x| x.id == complete_current_task.id) {
                     temp.error_vec = serde_json::to_string_pretty(&error_vec).unwrap();
                     temp.status = String::from("failed");
@@ -796,7 +794,7 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
             String::from("stopped")
         };
 
-        let app_lock = APP_HANDLE.read().clone();
+        let app_lock = APP_HANDLE.read().unwrap().clone();
         if let Some(app) = app_lock {
             let _ = &app
                 .emit(
@@ -820,7 +818,7 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
             error!("save error_msg to db failed: {}", e);
         } else {
             {
-                let mut tasks = TASKS.write();
+                let mut tasks = TASKS.write().unwrap();
                 if let Some(temp) = tasks.iter_mut().find(|x| x.id == complete_current_task.id) {
                     temp.error_vec = serde_json::to_string_pretty(&error_vec).unwrap();
                     temp.status = sync_status.clone();
@@ -834,7 +832,7 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
 #[tauri::command]
 async fn start_or_pause(app: AppHandle, id: i32, status: String) {
     if status == "stopped" {
-        let mut tasks = TASKS.write();
+        let mut tasks = TASKS.write().unwrap();
         for task in tasks.iter_mut() {
             if task.id == id {
                 task.status = String::from("stopped");
@@ -862,7 +860,7 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
         String::from("downloading")
     };
     let current_task = {
-        let mut tasks = TASKS.write();
+        let mut tasks = TASKS.write().unwrap();
         let mut current_task = None;
         for task in tasks.iter_mut() {
             if task.id == id {
@@ -903,13 +901,13 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
                     if let Err(e) = result.await {
                         error!("thread_error_msg: {} e: {}", &thread_error_msg, e);
 
-                        let app_lock = APP_HANDLE.read().clone();
+                        let app_lock = APP_HANDLE.read().unwrap().clone();
                         if let Some(app) = app_lock {
                             let _ = &app.emit("err_msg_main", &thread_error_msg).unwrap();
                         }
                     } else {
                         info!("id: {} thread finished", id);
-                        let app_lock = APP_HANDLE.read().clone();
+                        let app_lock = APP_HANDLE.read().unwrap().clone();
                         if let Some(app) = app_lock {
                             start_waiting(&app);
                         }
@@ -925,13 +923,13 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
                     let result = spawn(run_join_set_current(complete_current_task_copy));
                     if let Err(e) = result.await {
                         error!("thread_error_msg: {} e: {}", &thread_error_msg, e);
-                        let app_lock = APP_HANDLE.read().clone();
+                        let app_lock = APP_HANDLE.read().unwrap().clone();
                         if let Some(app) = app_lock {
                             let _ = &app.emit("err_msg_main", &thread_error_msg).unwrap();
                         }
                     } else {
                         info!("id: {} thread finished", id);
-                        let app_lock = APP_HANDLE.read().clone();
+                        let app_lock = APP_HANDLE.read().unwrap().clone();
                         if let Some(app) = app_lock {
                             start_waiting(&app);
                         }
@@ -953,14 +951,14 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
 #[tauri::command]
 async fn get_tasks(_app: AppHandle) -> Vec<PartialDownloadTask> {
     info!("get_tasks");
-    let tasks = TASKS.read().clone();
+    let tasks = TASKS.read().unwrap().clone();
     tasks
 }
 
 #[tauri::command]
 async fn start_all(_app: AppHandle) -> StartAllRes {
     info!("start_all ");
-    let mut tasks = TASKS.write();
+    let mut tasks = TASKS.write().unwrap();
     let mut count = 0;
     let mut data_for_db: Vec<StartAllData> = Vec::new();
     for task in tasks.iter_mut() {
@@ -1000,7 +998,7 @@ async fn start_all(_app: AppHandle) -> StartAllRes {
 
 #[tauri::command]
 async fn delete_all() -> Vec<PartialDownloadTask> {
-    let mut tasks = TASKS.write();
+    let mut tasks = TASKS.write().unwrap();
     let mut data_for_db: Vec<i32> = Vec::new();
     let mut new_tasks: Vec<PartialDownloadTask> = Vec::new();
     for task in tasks.drain(..) {
@@ -1022,7 +1020,7 @@ async fn delete_tasks(_app: AppHandle, id: i32) -> isize {
     let del_res = delete_download_task(id);
     match del_res {
         Ok(res) => {
-            let mut tasks = TASKS.write();
+            let mut tasks = TASKS.write().unwrap();
             tasks.retain(|x| x.id != id);
             info!("delete task: {}", res);
             res as isize
@@ -1036,7 +1034,7 @@ async fn delete_tasks(_app: AppHandle, id: i32) -> isize {
 
 #[tauri::command]
 async fn pause_all(_app: AppHandle) -> Vec<PartialDownloadTask> {
-    let mut tasks = TASKS.write();
+    let mut tasks = TASKS.write().unwrap();
     let mut data_for_db: Vec<StartAllData> = Vec::new();
     for task in tasks.iter_mut() {
         if task.status == "downloading" || task.status == "waiting" {
@@ -1054,7 +1052,7 @@ async fn pause_all(_app: AppHandle) -> Vec<PartialDownloadTask> {
 
 #[tauri::command]
 async fn pause_all_waiting() -> Vec<PartialDownloadTask> {
-    let mut tasks = TASKS.write();
+    let mut tasks = TASKS.write().unwrap();
     let mut data_for_db: Vec<StartAllData> = Vec::new();
     for task in tasks.iter_mut() {
         if task.status == "waiting" {
@@ -1209,7 +1207,7 @@ async fn add_new_task(app: AppHandle, url: String, dl_type: String) {
                                                 };
 
                                                 let tasks_to_log = {
-                                                    let mut tasks = TASKS.write();
+                                                    let mut tasks = TASKS.write().unwrap();
                                                     tasks.push(temp_task.clone());
                                                     (*tasks).clone()
                                                 };
@@ -1463,7 +1461,7 @@ pub fn add_new_task_juan_hua_fanwai(
                 };
 
                 let tasks_to_log = {
-                    let mut tasks = TASKS.write();
+                    let mut tasks = TASKS.write().unwrap();
                     tasks.push(temp_task.clone());
                     (*tasks).clone()
                 };
