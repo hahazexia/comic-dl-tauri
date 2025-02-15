@@ -30,6 +30,7 @@ use std::fs::{self, File};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::Semaphore;
 use tokio::task::{spawn, AbortHandle, JoinSet};
 use tokio::time::{timeout, Duration};
@@ -140,7 +141,7 @@ async fn download_single_image(
     index: usize,
     url: String,
     save_path: String,
-    semaphore: Arc<Semaphore>,
+    permit: OwnedSemaphorePermit,
     progress: Arc<QueuedRwLock<u32>>,
 ) -> DownloadResult {
     let current_status = {
@@ -157,20 +158,6 @@ async fn download_single_image(
         // tokio::time::sleep(Duration::from_secs(1)).await;
         // continue;
     }
-    let _permit = match semaphore.acquire().await {
-        Ok(permit) => permit,
-        Err(_) => {
-            let error_msg = format!(
-                "Failed to acquire semaphore for id: {} save_path: {} group: {} index: {}",
-                id, &save_path, group_index, index
-            );
-            return DownloadResult {
-                group_index,
-                index,
-                error_msg,
-            };
-        }
-    };
     let mut count = 0;
     let messages = vec!["请求失败，状态码", "请求错误", "请求超时", "字节转换失败"];
     let mut err_counts = std::collections::HashMap::new();
@@ -260,7 +247,7 @@ async fn download_single_image(
             *progress_lock += 1;
         }
     }
-
+    drop(permit);
     DownloadResult {
         group_index,
         index,
@@ -321,7 +308,6 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
     let all_count = complete_current_task.count;
     let cache_json_str = &complete_current_task.cache_json;
     let cache_json: Vec<CurrentElement> = serde_json::from_str(&cache_json_str).unwrap();
-    let semaphore = Arc::new(Semaphore::new(20));
     let total = all_count;
     let progress = Arc::new(QueuedRwLock::new(0));
 
@@ -334,6 +320,8 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
         let mut group_handles = Vec::<AbortHandle>::new();
         let mut join_set = JoinSet::new();
         let mut group_save_counter = 0;
+
+        let semaphore = Arc::new(Semaphore::new(20));
 
         for (i, url) in url_group.imgs.into_iter().enumerate() {
             if url.done {
@@ -369,7 +357,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
             }
             let save_path = save_path_temp.to_str().unwrap().to_string().clone();
             let url_str = url.href.clone();
-            let semaphore = semaphore.clone();
+            let permit = semaphore.clone().acquire_owned().await.unwrap();
             let progress = progress.clone();
             let handle = join_set.spawn(download_single_image(
                 complete_current_task.id,
@@ -377,7 +365,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
                 i,
                 url_str,
                 save_path,
-                semaphore,
+                permit,
                 progress,
             ));
             group_handles.push(handle);
@@ -626,7 +614,8 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
         }
         let save_path = save_path_temp.to_str().unwrap().to_string().clone();
         let url_str = url.href.clone();
-        let semaphore = semaphore.clone();
+
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
         let progress = progress.clone();
         let handle = join_set.spawn(download_single_image(
             complete_current_task.id,
@@ -634,7 +623,7 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
             i,
             url_str,
             save_path,
-            semaphore,
+            permit,
             progress,
         ));
         group_handles.push(handle);
