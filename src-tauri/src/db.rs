@@ -137,6 +137,7 @@ pub fn update_download_task_progress(
         ))
         .execute(&mut *conn)
 }
+#[allow(dead_code)]
 pub fn update_download_task_error_vec(
     task_id: i32,
     _error_vec: &str,
@@ -147,6 +148,27 @@ pub fn update_download_task_error_vec(
 
     diesel::update(download_tasks.find(task_id))
         .set((error_vec.eq(_error_vec), status.eq(_status)))
+        .execute(&mut *conn)
+}
+pub fn update_download_task_progress_error(
+    task_id: i32,
+    _progress: &str,
+    _now_count: i32,
+    _cache_json: &str,
+    _error_vec: &str,
+    _status: &str,
+) -> QueryResult<usize> {
+    use crate::schema::download_tasks::dsl::*;
+    let mut conn = DB_CONNECTION.get().unwrap().lock().unwrap();
+
+    diesel::update(download_tasks.find(task_id))
+        .set((
+            progress.eq(_progress),
+            now_count.eq(_now_count),
+            cache_json.eq(_cache_json),
+            error_vec.eq(_error_vec),
+            status.eq(_status),
+        ))
         .execute(&mut *conn)
 }
 
