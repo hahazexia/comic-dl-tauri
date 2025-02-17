@@ -276,15 +276,34 @@ async fn download_single_image(
         error_msg,
     }
 }
-
 fn sort_tasks() {
     const STATUS_ORDER: [&str; 5] = ["downloading", "waiting", "stopped", "failed", "finished"];
     let mut tasks = TASKS.write().unwrap();
-    tasks.sort_by_key(|x| {
-        STATUS_ORDER
+
+    tasks.sort_by(|a, b| {
+        // 获取 a 和 b 在 STATUS_ORDER 中的索引
+        let index_a = STATUS_ORDER
             .iter()
-            .position(|&s| s == x.status.as_str())
-            .unwrap_or(STATUS_ORDER.len())
+            .position(|&s| s == a.status)
+            .unwrap_or(STATUS_ORDER.len());
+        let index_b = STATUS_ORDER
+            .iter()
+            .position(|&s| s == b.status)
+            .unwrap_or(STATUS_ORDER.len());
+
+        if index_a == index_b {
+            // 如果 status 相同，先按 now_count 降序排序
+            let now_count_cmp = b.now_count.cmp(&a.now_count);
+            if now_count_cmp == std::cmp::Ordering::Equal {
+                // 如果 now_count 也相同，再按 count 升序排序
+                a.count.cmp(&b.count)
+            } else {
+                now_count_cmp
+            }
+        } else {
+            // 按 status 在 STATUS_ORDER 中的索引升序排序
+            index_a.cmp(&index_b)
+        }
     });
 }
 
@@ -442,7 +461,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
                         error!("Failed to sync TASKS");
                     }
                 }
-                sort_tasks();
+                // sort_tasks();
             }
         }
     }
