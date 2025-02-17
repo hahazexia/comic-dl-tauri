@@ -121,12 +121,13 @@ function sortTasks() {
   tasks_all.sort((a, b) => {
     const indexA = statusOrder.indexOf(a.status);
     const indexB = statusOrder.indexOf(b.status);
-    return indexA - indexB;
+
+    return indexA - indexB === 0 ? b.now_count - a.now_count || a.count - b.count : indexA - indexB;
   });
   tasks_current.sort((a, b) => {
     const indexA = statusOrder.indexOf(a.status);
     const indexB = statusOrder.indexOf(b.status);
-    return indexA - indexB;
+    return indexA - indexB === 0 ? b.now_count - a.now_count || a.count - b.count : indexA - indexB;
   });
 }
 
@@ -297,6 +298,7 @@ onMounted(() => {
   (async () => {
     let res: any = await invoke('get_tasks');
     console.log(res, 'get_tasks');
+    console.log(JSON.stringify(res), 'get_tasks');
     tasks_all.push(...res);
     tasks_current.push(...res);
 
@@ -628,6 +630,7 @@ onMounted(() => {
           height: 3px;
           max-width: 100%;
           background-color: #4872ac;
+          transition: width 2s ease-in-out;
         }
       }
 
