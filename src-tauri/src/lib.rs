@@ -393,7 +393,6 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
         }
 
         while let Some(res) = join_set.join_next().await {
-            info!("join set 任务完成");
             if let Ok(result) = res {
                 if result.error_msg == "stopped" {
                     for handle in group_handles.iter() {
