@@ -270,7 +270,6 @@ async fn download_single_image(
         }
     }
     drop(permit);
-    info!("图片下载结束");
     DownloadResult {
         group_index,
         index,
