@@ -122,12 +122,45 @@ function sortTasks() {
     const indexA = statusOrder.indexOf(a.status);
     const indexB = statusOrder.indexOf(b.status);
 
-    return indexA - indexB === 0 ? b.now_count - a.now_count || a.count - b.count : indexA - indexB;
+    // 先比较 status 在 statusOrder 中的索引
+    if (indexA !== indexB) {
+      return indexA - indexB;
+    }
+
+    // 如果 status 相同，比较 author
+    if (a.author !== b.author) {
+      return b.author.localeCompare(a.author);
+    }
+
+    // 如果 author 也相同，比较 now_count
+    if (b.now_count !== a.now_count) {
+      return b.now_count - a.now_count;
+    }
+
+    // 如果 now_count 相同，比较 count
+    return a.count - b.count;
   });
   tasks_current.sort((a, b) => {
     const indexA = statusOrder.indexOf(a.status);
     const indexB = statusOrder.indexOf(b.status);
-    return indexA - indexB === 0 ? b.now_count - a.now_count || a.count - b.count : indexA - indexB;
+
+    // 先比较 status 在 statusOrder 中的索引
+    if (indexA !== indexB) {
+      return indexA - indexB;
+    }
+
+    // 如果 status 相同，比较 author
+    if (a.author !== b.author) {
+      return b.author.localeCompare(a.author);
+    }
+
+    // 如果 author 也相同，比较 now_count
+    if (b.now_count !== a.now_count) {
+      return b.now_count - a.now_count;
+    }
+
+    // 如果 now_count 相同，比较 count
+    return a.count - b.count;
   });
 }
 
