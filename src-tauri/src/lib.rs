@@ -203,6 +203,10 @@ async fn download_single_image(
             break;
         }
     }
+    info!(
+        "download_single_image count: {} save_path: {}",
+        count, &save_path
+    );
 
     let mut error_msg = String::from("");
     if res.is_empty() {
