@@ -128,8 +128,10 @@ function sortTasks() {
     }
 
     // 如果 status 相同，比较 author
-    if (a.author !== b.author) {
-      return b.author.localeCompare(a.author);
+    if (a.author < b.author) {
+      return -1;
+    } else if (a.author > b.author) {
+      return 1;
     }
 
     // 如果 author 也相同，比较 now_count
@@ -150,8 +152,10 @@ function sortTasks() {
     }
 
     // 如果 status 相同，比较 author
-    if (a.author !== b.author) {
-      return b.author.localeCompare(a.author);
+    if (a.author < b.author) {
+      return -1;
+    } else if (a.author > b.author) {
+      return 1;
     }
 
     // 如果 author 也相同，比较 now_count
