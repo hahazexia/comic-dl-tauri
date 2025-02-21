@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 // use queue_rwlock::QueuedRwLock;
 use reqwest;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::path::PathBuf;
@@ -36,10 +36,20 @@ use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::Semaphore;
 use tokio::task::{spawn, AbortHandle, JoinSet};
 use tokio::time::{timeout, Duration};
-use utils::{clean_string, create_cache_dir, get_second_level_domain, read_from_json, StatusCode};
+use utils::{
+    clean_string, create_cache_dir, get_second_level_domain, read_from_json, save_to_json,
+    StatusCode,
+};
 
 pub static TASKS: RwLock<Vec<PartialDownloadTask>> = RwLock::new(Vec::new());
 pub static APP_HANDLE: LazyLock<RwLock<Option<AppHandle>>> = LazyLock::new(|| RwLock::new(None));
+pub static SETTING: LazyLock<RwLock<Setting>> = LazyLock::new(|| {
+    RwLock::new(Setting {
+        download_dir: String::from(""),
+        concurrent_task: String::from("1"),
+        concurrent_img: String::from("10"),
+    })
+});
 #[derive(Debug, Clone)]
 pub struct DownloadResult {
     group_index: usize,
@@ -67,6 +77,13 @@ pub struct StartAllData {
 pub struct StartAllRes {
     tasks: Vec<PartialDownloadTask>,
     changed: Vec<StartAllData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Setting {
+    download_dir: String,
+    concurrent_task: String,
+    concurrent_img: String,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -114,15 +131,31 @@ pub fn run() {
                     }
                 }
             }
-            let app_handle = app.handle();
-            let mut app_lock = APP_HANDLE.write().unwrap();
-            *app_lock = Some(app_handle.clone());
+            {
+                let app_handle = app.handle();
+                let mut app_lock = APP_HANDLE.write().unwrap();
+                *app_lock = Some(app_handle.clone());
+            }
+
+            {
+                let home_dir = home::home_dir().unwrap();
+                let setting_path = home_dir.join(format!(".comic_dl_tauri/setting.json"));
+                let res = read_from_json::<Setting>(&setting_path.to_str().unwrap()).unwrap();
+                info!("SETTING: {:?}", res);
+                let mut setting_lock = SETTING.write().unwrap();
+                *setting_lock = res;
+            }
             Ok(())
         })
-        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             get_tasks,
             add,
+            setting,
+            setting_save,
+            get_setting,
+            open_dir,
+            open_cache_folder,
+            download_dir,
             add_new_task,
             delete_tasks,
             start_or_pause,
@@ -332,13 +365,17 @@ fn get_downloading_count() -> i32 {
 
 fn start_waiting(app: &AppHandle) {
     let current_downloading = get_downloading_count();
-    if current_downloading < 2 {
+    let concurrent_count = {
+        let res = SETTING.read().unwrap();
+        res.concurrent_task.clone().parse::<i32>().unwrap_or(1)
+    };
+    if current_downloading < concurrent_count {
         // 改变第一个 waiting 的 task
         // let mut tasks = TASKS.write().unwrap();
         // if let Some(task) = tasks.iter_mut().find(|t| t.status == "waiting") {
         //     task.status = "downloading".to_string();
         // }
-        let change_count = 2 - current_downloading;
+        let change_count = concurrent_count - current_downloading;
         let mut modified_count = 0;
         let tasks = TASKS.write().unwrap();
         let mut changed_vec: Vec<i32> = Vec::new();
@@ -364,16 +401,24 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
     let total = all_count;
     let progress = Arc::new(AtomicUsize::new(0));
 
-    let home_dir = home::home_dir().unwrap();
-    let comic_basic_path = home_dir.join(format!(".comic_dl_tauri/download/"));
+    // let home_dir = home::home_dir().unwrap();
+    // let comic_basic_path = home_dir.join(format!(".comic_dl_tauri/download/"));
+    let comic_basic_path = {
+        let res = SETTING.read().unwrap();
+        PathBuf::from(res.download_dir.clone())
+    };
     let mut all_results = Vec::new();
     let mut cache_json_sync = cache_json.clone();
 
     'outer: for (group_index, url_group) in cache_json.into_iter().enumerate() {
         let mut group_handles = Vec::<AbortHandle>::new();
         let mut join_set = JoinSet::new();
+        let concurrent_count = {
+            let res = SETTING.read().unwrap();
+            res.concurrent_img.clone().parse::<usize>().unwrap_or(10)
+        };
 
-        let semaphore = Arc::new(Semaphore::new(10));
+        let semaphore = Arc::new(Semaphore::new(concurrent_count));
 
         for (i, url) in url_group.imgs.into_iter().enumerate() {
             if url.done {
@@ -546,15 +591,21 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
     let all_count = complete_current_task.count;
     let cache_json_str = &complete_current_task.cache_json;
     let cache_json: Vec<Img> = serde_json::from_str(&cache_json_str).unwrap();
-    let semaphore = Arc::new(Semaphore::new(10));
+    let concurrent_count = {
+        let res = SETTING.read().unwrap();
+        res.concurrent_img.clone().parse::<usize>().unwrap_or(10)
+    };
+    let semaphore = Arc::new(Semaphore::new(concurrent_count));
     let total = all_count;
     let progress = Arc::new(AtomicUsize::new(0));
     let mut all_results = Vec::new();
     let mut cache_json_sync = cache_json.clone();
     let mut group_handles = Vec::<AbortHandle>::new();
 
-    let home_dir = home::home_dir().unwrap();
-    let comic_basic_path = home_dir.join(format!(".comic_dl_tauri/download/"));
+    let comic_basic_path = {
+        let res = SETTING.read().unwrap();
+        PathBuf::from(res.download_dir.clone())
+    };
 
     let mut join_set = JoinSet::new();
 
@@ -724,12 +775,16 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
         return;
     }
 
+    let concurrent_count = {
+        let res = SETTING.read().unwrap();
+        res.concurrent_task.clone().parse::<i32>().unwrap_or(1)
+    };
     let downloading_count = get_downloading_count();
     info!(
         "start_or_pause downloading_count: {} status: {} id: {}",
         downloading_count, status, id
     );
-    let final_status = if downloading_count >= 2 && status == "downloading" {
+    let final_status = if downloading_count >= concurrent_count && status == "downloading" {
         String::from("waiting")
     } else {
         String::from("downloading")
@@ -836,6 +891,10 @@ async fn start_all(_app: AppHandle) -> StartAllRes {
     let mut tasks = TASKS.write().unwrap();
     let mut count = 0;
     let mut data_for_db: Vec<StartAllData> = Vec::new();
+    let concurrent_count = {
+        let res = SETTING.read().unwrap();
+        res.concurrent_task.clone().parse::<i32>().unwrap_or(1)
+    };
     for task in tasks.iter_mut() {
         if task.status == "downloading" {
             count += 1;
@@ -845,7 +904,7 @@ async fn start_all(_app: AppHandle) -> StartAllRes {
                 "start_all status: {} id: {} count: {}",
                 task.status, task.id, count
             );
-            if count >= 2 {
+            if count >= concurrent_count {
                 task.status = String::from("waiting");
                 data_for_db.push(StartAllData {
                     id: task.id,
@@ -982,7 +1041,7 @@ async fn add(app: AppHandle) {
         closable: true,
         title: "Add new task".to_string(),
         fullscreen: false,
-        focus: false,
+        focus: true,
         transparent: false,
         maximized: false,
         visible: true,
@@ -1014,6 +1073,153 @@ async fn add(app: AppHandle) {
         .unwrap()
         .build()
         .unwrap();
+}
+
+#[tauri::command]
+async fn setting(app: AppHandle) {
+    info!("open setting window");
+    let config = tauri_utils::config::WindowConfig {
+        label: "setting".to_string(),
+        create: false,
+        url: tauri::WebviewUrl::App("setting.html".into()),
+        user_agent: None,
+        drag_drop_enabled: true,
+        center: true,
+        x: None,
+        y: None,
+        width: 600_f64,
+        height: 250_f64,
+        min_width: None,
+        min_height: None,
+        max_width: None,
+        max_height: None,
+        resizable: false,
+        maximizable: false,
+        minimizable: true,
+        closable: true,
+        title: "Setting".to_string(),
+        fullscreen: false,
+        focus: true,
+        transparent: false,
+        maximized: false,
+        visible: true,
+        decorations: true,
+        always_on_bottom: false,
+        always_on_top: true,
+        visible_on_all_workspaces: false,
+        content_protected: false,
+        skip_taskbar: false,
+        window_classname: None,
+        theme: None,
+        title_bar_style: Default::default(),
+        hidden_title: false,
+        accept_first_mouse: false,
+        tabbing_identifier: None,
+        additional_browser_args: None,
+        shadow: true,
+        window_effects: None,
+        incognito: false,
+        parent: None,
+        proxy_url: None,
+        zoom_hotkeys_enabled: false,
+        browser_extensions_enabled: false,
+        use_https_scheme: false,
+        devtools: None,
+        background_color: None,
+    };
+    let _webview_window = tauri::WebviewWindowBuilder::from_config(&app, &config)
+        .unwrap()
+        .build()
+        .unwrap();
+}
+
+#[tauri::command]
+async fn download_dir(_app: AppHandle, current_dir: String) -> String {
+    info!("current_dir: {}", current_dir);
+    let init_dir = if !current_dir.is_empty() {
+        PathBuf::from(current_dir)
+    } else {
+        let home_dir = home::home_dir().unwrap();
+        home_dir.join(format!(".comic_dl_tauri/download/"))
+    };
+    let dir = rfd::FileDialog::new().set_directory(init_dir).pick_folder();
+    if let Some(res_dir) = dir {
+        let res = res_dir.to_str().unwrap_or("").to_string() + "/";
+        info!("res_dir: {:?}", &res);
+        return res;
+    } else {
+        return String::from("");
+    }
+}
+
+#[tauri::command]
+async fn setting_save(
+    app: AppHandle,
+    download_dir: String,
+    concurrent_task: String,
+    concurrent_img: String,
+) {
+    info!(
+        "download_dir: {}, concurrent_task: {}, concurrent_img: {}",
+        download_dir, concurrent_task, concurrent_img
+    );
+    let temp = Setting {
+        download_dir: download_dir,
+        concurrent_task: concurrent_task,
+        concurrent_img: concurrent_img,
+    };
+    let home_dir = home::home_dir().unwrap();
+    let setting_path = home_dir.join(format!(".comic_dl_tauri/setting.json"));
+    let res = save_to_json(&temp, setting_path.to_str().unwrap());
+
+    match res {
+        Ok(_) => {
+            let setting_window = app.get_webview_window("setting").unwrap();
+            let _ = setting_window.close();
+        }
+        Err(e) => {
+            app.emit("err_msg_setting", format!("setting save failed: {}", e))
+                .unwrap();
+        }
+    }
+}
+
+#[tauri::command]
+async fn get_setting(_app: AppHandle) -> Setting {
+    let home_dir = home::home_dir().unwrap();
+    let setting_path = home_dir.join(format!(".comic_dl_tauri/setting.json"));
+    let res = read_from_json::<Setting>(&setting_path.to_str().unwrap()).unwrap();
+    res
+}
+
+#[tauri::command]
+async fn open_dir(app: AppHandle, dir: String) {
+    info!("open_dir dir: {}", dir);
+    let res = open::that(dir);
+    match res {
+        Ok(_) => {}
+        Err(e) => {
+            error!("open_dir failed: {}", e);
+            app.emit("err_msg_main", format!("open_dir failed: {}", e))
+                .unwrap();
+        }
+    }
+}
+
+#[tauri::command]
+async fn open_cache_folder(app: AppHandle) {
+    let home_dir = home::home_dir().unwrap();
+    let cache_dir = home_dir.join(format!(".comic_dl_tauri"));
+
+    let res = open::that(cache_dir);
+    match res {
+        Ok(_) => {}
+        Err(e) => {
+            error!("open_dir failed: {}", e);
+            app.emit("err_msg_main", format!("open_dir failed: {}", e))
+                .unwrap();
+        }
+    }
 }
 
 #[tauri::command]

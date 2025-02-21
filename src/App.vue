@@ -58,6 +58,11 @@ const deleteAllOpen = ref(false);
 const errorInfoOpen = ref(false);
 const error_info = ref('');
 
+const isMenuVisible = ref(false);
+const menuX = ref(0);
+const menuY = ref(0);
+const currentMenuData = ref<Tasks>();
+
 const task_downloading = computed(() => {
   return tasks_all.filter(task => task.status === 'downloading');
 });
@@ -75,7 +80,15 @@ const task_waiting = computed(() => {
 });
 
 async function add() {
-  await invoke("add").then(console.log).catch(console.error);
+  await invoke('add').then(console.log).catch(console.error);
+}
+
+async function setting() {
+  await invoke('setting');
+}
+
+async function folder() {
+  await invoke('open_cache_folder');
 }
 
 function switchMenu(menu: string) {
@@ -259,6 +272,33 @@ const deleteAll = async () => {
   deleteAllOpen.value = true;
 };
 
+function showContextMenu(e: any, data: any) {
+  menuX.value = e.pageX;
+  menuY.value = e.pageY;
+  isMenuVisible.value = true;
+  currentMenuData.value = data;
+};
+
+async function handleMenuItemClick() {
+  let res: any = await invoke('get_setting');
+  let map: any = {
+    juan: '单行本',
+    hua: '单话',
+    fanwai: '番外篇',
+    current: '',
+  };
+  let name = `${currentMenuData.value?.comic_name}_${map[currentMenuData.value?.dl_type as any]}`;
+  let download_dir = `${res.download_dir}${currentMenuData.value?.author ? (currentMenuData.value?.author + '/') : ''}${name}`;
+  await invoke('open_dir', {
+    dir: download_dir,
+  });
+  isMenuVisible.value = false;
+}
+
+function blankClick() {
+  isMenuVisible.value = false;
+}
+
 onMounted(() => {
   listen('err_msg_main', (e: any) => {
     toast(`${e.payload}`, {
@@ -345,7 +385,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="main">
+  <div class="main" @click="blankClick">
     <div class="menu">
       <div class="menu-option all" :class="{ active: active_menu === 'all' }" @click="() => switchMenu('all')">All
         Tasks<span class="num" v-text="tasks_all.length"></span></div>
@@ -361,6 +401,8 @@ onMounted(() => {
       <div class="menu-option failed" :class="{ active: active_menu === 'failed' }" @click="() =>
         switchMenu('failed')">Failed<span class="num" v-text="task_failed.length"></span></div>
       <div class="add" title="create new task" @click="add"></div>
+      <div class="folder" title="open cache folder" @click="folder"></div>
+      <div class="setting" title="setting" @click="setting"></div>
     </div>
     <div class="list">
       <div class="list-tool">
@@ -369,7 +411,8 @@ onMounted(() => {
         <div class="list-tool-btn pause-all-waiting" title="pause all waiting" @click="pauseAllWaiting"></div>
         <div class="list-tool-btn delete-all" title="delete all not downloading" @click="deleteAll"></div>
       </div>
-      <div class="list-item" v-for="data in tasks_current" :key="data.id">
+      <div class="list-item" v-for="data in tasks_current" :key="data.id"
+        @contextmenu.prevent.capture="(e) => showContextMenu(e, data)">
         <div class="name" :class="{ 'downloading-name': data.status === 'downloading' }"
           v-text="`${data.comic_name}_${dl_type_map[data.dl_type]}`"
           :title="`${data.comic_name}_${dl_type_map[data.dl_type]}`"></div>
@@ -424,6 +467,11 @@ onMounted(() => {
         <button class="delete-btn" @click="closeErrorInfoModal">cancel</button>
       </div>
     </dialog>
+    <div v-if="isMenuVisible" class="custom-menu" :style="{ left: menuX + 'px', top: menuY + 'px' }">
+      <ul>
+        <li @click="handleMenuItemClick">open download dir</li>
+      </ul>
+    </div>
   </div>
 </template>
 
@@ -445,11 +493,47 @@ onMounted(() => {
       background-image: url('./img/add.svg');
       background-repeat: no-repeat;
       background-size: contain;
-      width: 20px;
-      height: 20px;
+      width: 16px;
+      height: 16px;
       position: absolute;
       left: 10px;
       bottom: 10px;
+
+      &:hover {
+        filter: hue-rotate(180deg) brightness(0.8) saturate(2);
+      }
+    }
+
+    .folder {
+      cursor: pointer;
+      background-image: url('./img/folder.svg');
+      background-repeat: no-repeat;
+      background-size: contain;
+      width: 20px;
+      height: 20px;
+      position: absolute;
+      right: 40px;
+      bottom: 10px;
+
+      &:hover {
+        filter: hue-rotate(180deg) brightness(0.8) saturate(2);
+      }
+    }
+
+    .setting {
+      cursor: pointer;
+      background-image: url('./img/setting.svg');
+      background-repeat: no-repeat;
+      background-size: contain;
+      width: 18px;
+      height: 18px;
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+
+      &:hover {
+        filter: hue-rotate(180deg) brightness(0.8) saturate(2);
+      }
     }
 
     .menu-option {
@@ -783,6 +867,31 @@ onMounted(() => {
         }
       }
     }
+  }
+
+  .custom-menu {
+    position: absolute;
+    background-color: #f9f9f9;
+    border: 1px solid #ccc;
+    padding: 5px;
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+  }
+
+  .custom-menu ul {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .custom-menu ul li {
+    font-size: 12px;
+    padding: 5px 5px;
+    cursor: pointer;
+  }
+
+  .custom-menu ul li:hover {
+    background-color: #f0f0f0;
   }
 }
 </style>
