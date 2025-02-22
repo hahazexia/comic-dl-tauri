@@ -216,21 +216,33 @@ async fn download_single_image(
                         }
                         Err(_e) => {
                             res = Bytes::from("");
-                            error!("download_single_image res error: {}", _e);
+                            error!(
+                                "download_single_image res id: {} save_path: {} error: {}",
+                                id, &save_path, _e
+                            );
                         }
                     }
                     break;
                 } else {
-                    error!("download_single_image response status failed id: {}", id);
+                    error!(
+                        "download_single_image response status failed id: {} save_path: {}",
+                        id, &save_path
+                    );
                     res = Bytes::from("");
                 }
             }
             Ok(Err(_e)) => {
-                error!("download_single_image id: {} err: {}", id, _e);
+                error!(
+                    "download_single_image id: {} save_path: {} err: {}",
+                    id, &save_path, _e
+                );
                 res = Bytes::from("");
             }
             Err(e) => {
-                error!("download_single_image id: {} err: {}", id, e);
+                error!(
+                    "download_single_image id: {} save_path: {} err: {}",
+                    id, &save_path, e
+                );
                 res = Bytes::from("");
             }
         }
