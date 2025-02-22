@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, RwLock};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Listener, Manager};
 use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::Semaphore;
 use tokio::task::{spawn, AbortHandle, JoinSet};
@@ -96,6 +96,17 @@ pub struct GetDownloadingCount {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                let window_label = window.label();
+                info!("on_window_event window label: {}", window_label);
+                if window_label == "main" {
+                    api.prevent_close();
+                    let _ = window.minimize();
+                }
+            }
+            _ => {}
+        })
         .setup(|app| {
             // 初始化日志
             if let Err(e) = init_log() {
