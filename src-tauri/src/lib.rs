@@ -55,6 +55,7 @@ pub struct DownloadResult {
     group_index: usize,
     index: usize,
     error_msg: String,
+    save_path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -194,6 +195,7 @@ async fn download_single_image(
             group_index,
             index,
             error_msg: String::from("stopped"),
+            save_path,
         };
     }
     let mut count = 0;
@@ -312,6 +314,7 @@ async fn download_single_image(
         group_index,
         index,
         error_msg,
+        save_path,
     }
 }
 
@@ -471,6 +474,13 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
 
         while let Some(res) = join_set.join_next().await {
             if let Ok(result) = res {
+                info!(
+                    "run_join_set_juanhuafanwai join_set.join_next group_index: {} index: {} save_path: {} error_msg: {}",
+                    result.group_index,
+                    result.index,
+                    result.save_path,
+                    result.error_msg,
+                );
                 if result.error_msg == "stopped" {
                     for handle in group_handles.iter() {
                         handle.abort();
@@ -519,8 +529,8 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
                         error!("Failed to sync TASKS");
                     }
                 }
-                // sort_tasks();
             }
+            info!("run_join_set_juanhuafanwai join_set.join_next finished");
         }
     }
     // 确保最后一次进度也保存到数据库
