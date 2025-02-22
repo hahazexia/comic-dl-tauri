@@ -87,6 +87,12 @@ pub struct Setting {
     concurrent_img: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct GetDownloadingCount {
+    count: i32,
+    downloading_ids: Vec<i32>,
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -368,15 +374,20 @@ fn sort_tasks() {
     });
 }
 
-fn get_downloading_count() -> i32 {
+fn get_downloading_count() -> GetDownloadingCount {
     let tasks = TASKS.read().unwrap();
     let mut count = 0;
+    let mut downloading_ids: Vec<i32> = Vec::new();
     for task in tasks.iter() {
         if task.status == "downloading" {
             count += 1;
+            downloading_ids.push(task.id);
         }
     }
-    count
+    GetDownloadingCount {
+        count,
+        downloading_ids,
+    }
 }
 
 fn start_waiting(app: &AppHandle) {
@@ -385,13 +396,13 @@ fn start_waiting(app: &AppHandle) {
         let res = SETTING.read().unwrap();
         res.concurrent_task.clone().parse::<i32>().unwrap_or(1)
     };
-    if current_downloading < concurrent_count {
+    if current_downloading.count < concurrent_count {
         // 改变第一个 waiting 的 task
         // let mut tasks = TASKS.write().unwrap();
         // if let Some(task) = tasks.iter_mut().find(|t| t.status == "waiting") {
         //     task.status = "downloading".to_string();
         // }
-        let change_count = concurrent_count - current_downloading;
+        let change_count = concurrent_count - current_downloading.count;
         let mut modified_count = 0;
         let tasks = TASKS.write().unwrap();
         let mut changed_vec: Vec<i32> = Vec::new();
@@ -803,11 +814,15 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
         res.concurrent_task.clone().parse::<i32>().unwrap_or(1)
     };
     let downloading_count = get_downloading_count();
+    if downloading_count.downloading_ids.contains(&id) {
+        info!("already downloading");
+        return;
+    }
     info!(
         "start_or_pause downloading_count: {} status: {} id: {}",
-        downloading_count, status, id
+        downloading_count.count, status, id
     );
-    let final_status = if downloading_count >= concurrent_count && status == "downloading" {
+    let final_status = if downloading_count.count >= concurrent_count && status == "downloading" {
         String::from("waiting")
     } else {
         String::from("downloading")
