@@ -99,7 +99,10 @@ pub fn run() {
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 let window_label = window.label();
-                info!("on_window_event window label: {}", window_label);
+                info!(
+                    "on_window_event window label: {} event: {:?}",
+                    window_label, event
+                );
                 if window_label == "main" {
                     api.prevent_close();
                     let _ = window.minimize();
