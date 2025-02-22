@@ -155,6 +155,7 @@ pub fn run() {
             get_setting,
             open_dir,
             open_cache_folder,
+            open_about_winfow,
             download_dir,
             add_new_task,
             delete_tasks,
@@ -1220,6 +1221,64 @@ async fn open_cache_folder(app: AppHandle) {
                 .unwrap();
         }
     }
+}
+
+#[tauri::command]
+async fn open_about_winfow(app: AppHandle) {
+    info!("open about window");
+    let config = tauri_utils::config::WindowConfig {
+        label: "about".to_string(),
+        create: false,
+        url: tauri::WebviewUrl::App("about.html".into()),
+        user_agent: None,
+        drag_drop_enabled: true,
+        center: true,
+        x: None,
+        y: None,
+        width: 300_f64,
+        height: 300_f64,
+        min_width: None,
+        min_height: None,
+        max_width: None,
+        max_height: None,
+        resizable: false,
+        maximizable: false,
+        minimizable: true,
+        closable: true,
+        title: "About".to_string(),
+        fullscreen: false,
+        focus: true,
+        transparent: false,
+        maximized: false,
+        visible: true,
+        decorations: true,
+        always_on_bottom: false,
+        always_on_top: true,
+        visible_on_all_workspaces: false,
+        content_protected: false,
+        skip_taskbar: false,
+        window_classname: None,
+        theme: None,
+        title_bar_style: Default::default(),
+        hidden_title: false,
+        accept_first_mouse: false,
+        tabbing_identifier: None,
+        additional_browser_args: None,
+        shadow: true,
+        window_effects: None,
+        incognito: false,
+        parent: None,
+        proxy_url: None,
+        zoom_hotkeys_enabled: false,
+        browser_extensions_enabled: false,
+        use_https_scheme: false,
+        devtools: None,
+        background_color: None,
+    };
+    let _webview_window = tauri::WebviewWindowBuilder::from_config(&app, &config)
+        .unwrap()
+        .build()
+        .unwrap();
 }
 
 #[tauri::command]

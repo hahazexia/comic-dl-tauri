@@ -91,6 +91,10 @@ async function folder() {
   await invoke('open_cache_folder');
 }
 
+async function about() {
+  await invoke('open_about_winfow');
+}
+
 function switchMenu(menu: string) {
   if (active_menu.value === menu) return;
   active_menu.value = menu;
@@ -401,6 +405,7 @@ onMounted(() => {
       <div class="menu-option failed" :class="{ active: active_menu === 'failed' }" @click="() =>
         switchMenu('failed')">Failed<span class="num" v-text="task_failed.length"></span></div>
       <div class="add" title="create new task" @click="add"></div>
+      <div class="about" title="About" @click="about"></div>
       <div class="folder" title="open cache folder" @click="folder"></div>
       <div class="setting" title="setting" @click="setting"></div>
     </div>
@@ -497,6 +502,22 @@ onMounted(() => {
       height: 16px;
       position: absolute;
       left: 10px;
+      bottom: 10px;
+
+      &:hover {
+        filter: hue-rotate(180deg) brightness(0.8) saturate(2);
+      }
+    }
+
+    .about {
+      cursor: pointer;
+      background-image: url('./img/info2.svg');
+      background-repeat: no-repeat;
+      background-size: contain;
+      width: 20px;
+      height: 18px;
+      position: absolute;
+      right: 70px;
       bottom: 10px;
 
       &:hover {
