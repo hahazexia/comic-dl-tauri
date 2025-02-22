@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, RwLock};
-use tauri::{AppHandle, Emitter, Listener, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::Semaphore;
 use tokio::task::{spawn, AbortHandle, JoinSet};
