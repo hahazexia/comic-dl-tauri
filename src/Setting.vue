@@ -8,6 +8,8 @@ import 'vue3-toastify/dist/index.css';
 const download_dir = ref('');
 const concurrent_task = ref('1');
 const concurrent_img = ref('10');
+const img_timeout = ref('5');
+const img_retry_count = ref('3');
 const download_dir_flag = ref(false);
 
 async function submit() {
@@ -15,6 +17,8 @@ async function submit() {
     downloadDir: download_dir.value,
     concurrentTask: concurrent_task.value,
     concurrentImg: concurrent_img.value,
+    imgTimeout: img_timeout.value,
+    imgRetryCount: img_retry_count.value,
   });
 }
 
@@ -26,16 +30,15 @@ async function downloadDir() {
   let res: string = await invoke('download_dir', {
     currentDir: download_dir.value,
   });
-  console.log(res, '目录看看');
   download_dir.value = res;
   download_dir_flag.value = false;
 }
 
-function concurrentTaskInput() {
-  let value = concurrent_task.value.replace(/\D/g, '');
+const handleInput = (inputRef: any) => {
+  let value = inputRef.value.replace(/\D/g, '');
   value = value.replace(/^0+/, '');
-  concurrent_task.value = value;
-}
+  inputRef.value = value;
+};
 
 onMounted(() => {
   listen('err_msg_setting', (e: any) => {
@@ -51,6 +54,8 @@ onMounted(() => {
     download_dir.value = res.download_dir;
     concurrent_task.value = res.concurrent_task;
     concurrent_img.value = res.concurrent_img;
+    img_timeout.value = res.img_timeout;
+    img_retry_count.value = res.img_retry_count;
   })();
 });
 
@@ -69,7 +74,7 @@ onMounted(() => {
       <div class="form-item">
         <label for="concurrent_task">concurrent task<span>:</span></label>
         <input class="form-input task-input" name="concurrent_task" id="concurrent_task" type="text" spellcheck="false"
-          v-model="concurrent_task" @input="concurrentTaskInput">
+          v-model="concurrent_task" @input="() => handleInput(concurrent_task)">
       </div>
       <div class="form-item">
         <label for="concurrent_img">concurrent img<span>:</span></label>
@@ -81,6 +86,18 @@ onMounted(() => {
           <option value="25">25</option>
           <option value="30">30</option>
         </select>
+      </div>
+
+      <div class="form-item">
+        <label for="img_timeout">img timeout<span>:</span></label>
+        <input class="form-input task-input" name="img_timeout" id="img_timeout" type="text" spellcheck="false"
+          v-model="img_timeout" @input="() => handleInput(img_timeout)">
+      </div>
+
+      <div class="form-item">
+        <label for="img_retry_count">img retry count<span>:</span></label>
+        <input class="form-input task-input" name="img_retry_count" id="img_retry_count" type="text" spellcheck="false"
+          v-model="img_retry_count" @input="() => handleInput(img_retry_count)">
       </div>
       <div class="btns">
         <button class="submit" @click.prevent="submit">submit</button>

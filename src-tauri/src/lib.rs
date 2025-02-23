@@ -32,10 +32,12 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, RwLock};
+use std::thread::spawn;
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::runtime::Runtime;
 use tokio::sync::OwnedSemaphorePermit;
 use tokio::sync::Semaphore;
-use tokio::task::{spawn, AbortHandle, JoinSet};
+use tokio::task::{AbortHandle, JoinSet};
 use tokio::time::{timeout, Duration};
 use utils::{
     clean_string, create_cache_dir, get_second_level_domain, read_from_json, save_to_json,
@@ -49,6 +51,8 @@ pub static SETTING: LazyLock<RwLock<Setting>> = LazyLock::new(|| {
         download_dir: String::from(""),
         concurrent_task: String::from("1"),
         concurrent_img: String::from("10"),
+        img_timeout: String::from("5"),
+        img_retry_count: String::from("3"),
     })
 });
 #[derive(Debug, Clone)]
@@ -86,6 +90,8 @@ pub struct Setting {
     download_dir: String,
     concurrent_task: String,
     concurrent_img: String,
+    img_timeout: String,
+    img_retry_count: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -163,7 +169,14 @@ pub fn run() {
             {
                 let home_dir = home::home_dir().unwrap();
                 let setting_path = home_dir.join(format!(".comic_dl_tauri/setting.json"));
-                let res = read_from_json::<Setting>(&setting_path.to_str().unwrap()).unwrap();
+                let res =
+                    read_from_json::<Setting>(&setting_path.to_str().unwrap()).unwrap_or(Setting {
+                        download_dir: String::from((&setting_path).to_str().unwrap_or("")),
+                        concurrent_task: String::from("1"),
+                        concurrent_img: String::from("10"),
+                        img_timeout: String::from("5"),
+                        img_retry_count: String::from("3"),
+                    });
                 info!("SETTING: {:?}", res);
                 let mut setting_lock = SETTING.write().unwrap();
                 *setting_lock = res;
@@ -222,10 +235,22 @@ async fn download_single_image(
     }
     let mut count = 0;
     let mut res;
+    let img_setting = {
+        let res = SETTING.read().unwrap();
+        [
+            res.img_timeout.clone().parse::<u64>().unwrap_or(5),
+            res.img_retry_count.clone().parse::<u64>().unwrap_or(3),
+        ]
+    };
 
     loop {
+        info!("download img loop count: {}", count);
         count += 1;
-        let response_result = timeout(Duration::from_secs(10), reqwest::get(url.clone())).await;
+        let response_result = timeout(
+            Duration::from_secs(img_setting[0]),
+            reqwest::get(url.clone()),
+        )
+        .await;
 
         match response_result {
             Ok(Ok(response)) => {
@@ -269,7 +294,7 @@ async fn download_single_image(
             }
         }
 
-        if count > 10 {
+        if count > img_setting[1] {
             break;
         }
     }
@@ -280,11 +305,13 @@ async fn download_single_image(
 
     let mut error_msg = String::from("");
     if res.is_empty() {
+        info!("download img res empty save_path: {}", &save_path);
         error_msg = format!(
             "download img failed: id: {} save_path: {} group_index: {} index: {}",
             id, &save_path, group_index, index
         );
     } else {
+        info!("download img handle img save_path: {}", &save_path);
         // 处理图片格式
         if let Ok(img) = load_from_memory(&res) {
             let jpg_bytes = img.to_rgb8();
@@ -310,6 +337,7 @@ async fn download_single_image(
 
         // 更新进度
         if error_msg.is_empty() {
+            info!("download img emit progress save_path: {}", &save_path);
             progress.fetch_add(1, Ordering::Relaxed);
             let pro = progress.load(Ordering::Relaxed);
             if pro % 10 == 0 {
@@ -343,6 +371,7 @@ async fn download_single_image(
             }
         }
     }
+    info!("download img drop permit save_path: {}", &save_path);
     drop(permit);
     DownloadResult {
         group_index,
@@ -451,7 +480,6 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
         "current" => String::from("current"),
         _ => String::from(""),
     };
-
     // let home_dir = home::home_dir().unwrap();
     // let comic_basic_path = home_dir.join(format!(".comic_dl_tauri/download/"));
     let comic_basic_path = {
@@ -460,7 +488,6 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
     };
     let mut all_results = Vec::new();
     let mut cache_json_sync = cache_json.clone();
-
     'outer: for (group_index, url_group) in cache_json.into_iter().enumerate() {
         let mut group_handles = Vec::<AbortHandle>::new();
         let mut join_set = JoinSet::new();
@@ -512,7 +539,6 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
             ));
             group_handles.push(handle);
         }
-
         while let Some(res) = join_set.join_next().await {
             if let Ok(result) = res {
                 info!(
@@ -926,9 +952,23 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
                         &complete_current_task.dl_type,
                     );
 
-                    let result = spawn(run_join_set_juanhuafanwai(complete_current_task));
-                    if let Err(e) = result.await {
-                        error!("thread_error_msg: {} e: {}", &thread_error_msg, e);
+                    let result = std::thread::spawn(|| {
+                        let rt = Runtime::new().unwrap();
+
+                        rt.block_on(async {
+                            run_join_set_juanhuafanwai(complete_current_task).await
+                        });
+                    });
+
+                    if let Err(e) = result.join() {
+                        if let Some(panic_msg) = e.downcast_ref::<String>() {
+                            eprintln!("Thread panicked with message: {}", panic_msg);
+                        } else if let Some(panic_msg) = e.downcast_ref::<&str>() {
+                            eprintln!("Thread panicked with message: {}", panic_msg);
+                        } else {
+                            eprintln!("Thread panicked with an unknown error.");
+                        }
+                        error!("thread_error_msg: {} e: {:?}", &thread_error_msg, e);
 
                         let app_lock = APP_HANDLE.read().unwrap().clone();
                         if let Some(app) = app_lock {
@@ -949,9 +989,15 @@ async fn start_or_pause(app: AppHandle, id: i32, status: String) {
                         &current_task_temp.dl_type,
                     );
 
-                    let result = spawn(run_join_set_current(complete_current_task_copy));
-                    if let Err(e) = result.await {
-                        error!("thread_error_msg: {} e: {}", &thread_error_msg, e);
+                    let result = spawn(|| {
+                        let rt = Runtime::new().unwrap();
+
+                        let _result = rt.block_on(async {
+                            run_join_set_current(complete_current_task_copy).await
+                        });
+                    });
+                    if let Err(e) = result.join() {
+                        error!("thread_error_msg: {} e: {:?}", &thread_error_msg, e);
                         let app_lock = APP_HANDLE.read().unwrap().clone();
                         if let Some(app) = app_lock {
                             let _ = &app.emit("err_msg_main", &thread_error_msg).unwrap();
@@ -1187,7 +1233,7 @@ async fn setting(app: AppHandle) {
         x: None,
         y: None,
         width: 600_f64,
-        height: 250_f64,
+        height: 300_f64,
         min_width: None,
         min_height: None,
         max_width: None,
@@ -1257,24 +1303,32 @@ async fn setting_save(
     download_dir: String,
     concurrent_task: String,
     concurrent_img: String,
+    img_timeout: String,
+    img_retry_count: String,
 ) {
     info!(
-        "download_dir: {}, concurrent_task: {}, concurrent_img: {}",
-        download_dir, concurrent_task, concurrent_img
+        "download_dir: {}, concurrent_task: {}, concurrent_img: {}, img_timeout: {}, img_retry_count: {}",
+        download_dir, concurrent_task, concurrent_img, img_timeout, img_retry_count
     );
     let temp = Setting {
         download_dir: download_dir,
         concurrent_task: concurrent_task,
         concurrent_img: concurrent_img,
+        img_timeout: img_timeout,
+        img_retry_count: img_retry_count,
     };
     let home_dir = home::home_dir().unwrap();
     let setting_path = home_dir.join(format!(".comic_dl_tauri/setting.json"));
-    let res = save_to_json(&temp, setting_path.to_str().unwrap());
+    let res = save_to_json(&temp, (&setting_path).to_str().unwrap());
 
     match res {
         Ok(_) => {
             let setting_window = app.get_webview_window("setting").unwrap();
             let _ = setting_window.close();
+            {
+                let mut setting_lock = SETTING.write().unwrap();
+                *setting_lock = temp;
+            }
         }
         Err(e) => {
             app.emit("err_msg_setting", format!("setting save failed: {}", e))
@@ -1287,7 +1341,13 @@ async fn setting_save(
 async fn get_setting(_app: AppHandle) -> Setting {
     let home_dir = home::home_dir().unwrap();
     let setting_path = home_dir.join(format!(".comic_dl_tauri/setting.json"));
-    let res = read_from_json::<Setting>(&setting_path.to_str().unwrap()).unwrap();
+    let res = read_from_json::<Setting>(&setting_path.to_str().unwrap()).unwrap_or(Setting {
+        download_dir: String::from((&setting_path).to_str().unwrap_or("")),
+        concurrent_task: String::from("1"),
+        concurrent_img: String::from("10"),
+        img_timeout: String::from("5"),
+        img_retry_count: String::from("3"),
+    });
     res
 }
 
