@@ -1,5 +1,7 @@
 # comic-dl-tauri
 
+<p align="center"><img width="200" src="src/img/chimney.gif" alt=""></p>
+
 comic-dl desktop app by tauri
 
 ## todo
