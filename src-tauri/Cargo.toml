@@ -41,4 +41,5 @@ libsqlite3-sys = { version = "0.31.0", features = ["bundled"] }
 diesel = { version = "2.2.7", features = ["sqlite", "returning_clauses_for_sqlite_3_35"] }
 rfd = "0.15.2"
 open = "5.3.2"
+tauri-plugin-notification = "2"
 

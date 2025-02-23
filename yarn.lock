@@ -335,6 +335,13 @@
   dependencies:
     "@tauri-apps/api" "^2.0.0"
 
+"@tauri-apps/plugin-notification@~2":
+  version "2.2.1"
+  resolved "https://registry.yarnpkg.com/@tauri-apps/plugin-notification/-/plugin-notification-2.2.1.tgz#7e42af4f7a1f260cebf92fdfc2262d5132d93705"
+  integrity sha512-QF8Zod6XDhxD6xkD5nU/BjbOpJ6+3gxGCrVULOdLpvMuMSN2Z2IdObV/qgnrEJk1UamUCF1ClQUqNCbk4zTJNQ==
+  dependencies:
+    "@tauri-apps/api" "^2.0.0"
+
 "@types/estree@1.0.6":
   version "1.0.6"
   resolved "https://mirrors.cloud.tencent.com/npm/@types/estree/-/estree-1.0.6.tgz"

@@ -23,6 +23,7 @@ use log_init::init_log;
 use mangadex::handle_mangadex;
 use models::{DownloadTask, PartialDownloadTask};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use tauri_plugin_notification::NotificationExt;
 
 // use queue_rwlock::QueuedRwLock;
 use reqwest;
@@ -96,6 +97,7 @@ pub struct GetDownloadingCount {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 let window_label = window.label();
@@ -442,6 +444,14 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
     let total = all_count;
     let progress = Arc::new(AtomicUsize::new(0));
 
+    let comic_type = match complete_current_task.dl_type.as_str() {
+        "juan" => String::from("单行本"),
+        "hua" => String::from("单话"),
+        "fanwai" => String::from("番外篇"),
+        "current" => String::from("current"),
+        _ => String::from(""),
+    };
+
     // let home_dir = home::home_dir().unwrap();
     // let comic_basic_path = home_dir.join(format!(".comic_dl_tauri/download/"));
     let comic_basic_path = {
@@ -466,13 +476,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
                 progress.fetch_add(1, Ordering::Relaxed);
                 continue;
             }
-            let comic_type = match complete_current_task.dl_type.as_str() {
-                "juan" => String::from("单行本"),
-                "hua" => String::from("单话"),
-                "fanwai" => String::from("番外篇"),
-                "current" => String::from("current"),
-                _ => String::from(""),
-            };
+
             let save_path_temp = if complete_current_task.author.is_empty() {
                 comic_basic_path.join(format!(
                     "{}_{}/{}/{}.jpg",
@@ -630,6 +634,29 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
             temp.status = status_for_db.to_string();
             temp.progress = progress_str.clone();
             temp.now_count = current_progress as i32;
+        }
+    }
+    if status_for_db == "finished" || status_for_db == "failed" {
+        let app_lock = APP_HANDLE.read().unwrap().clone();
+        if let Some(app) = app_lock {
+            let res = app
+                .notification()
+                .builder()
+                .title("Tauri")
+                .body(format!(
+                    "{}/{}_{} is {}",
+                    complete_current_task.author,
+                    complete_current_task.comic_name,
+                    &comic_type,
+                    status_for_db
+                ))
+                .show();
+            match res {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("run_join_set_juanhuafanwai notification err: {}", e);
+                }
+            }
         }
     }
     sort_tasks();
@@ -798,6 +825,26 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
             temp.status = status_for_db.to_string();
             temp.progress = progress_str.clone();
             temp.now_count = current_progress as i32;
+        }
+    }
+    if status_for_db == "finished" || status_for_db == "failed" {
+        let app_lock = APP_HANDLE.read().unwrap().clone();
+        if let Some(app) = app_lock {
+            let res = app
+                .notification()
+                .builder()
+                .title("Tauri")
+                .body(format!(
+                    "{} is {}",
+                    complete_current_task.comic_name, status_for_db
+                ))
+                .show();
+            match res {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("run_join_set_current notification err: {}", e);
+                }
+            }
         }
     }
     sort_tasks();
