@@ -642,7 +642,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
             let res = app
                 .notification()
                 .builder()
-                .title("Tauri")
+                .title("Comic-dl-tauri")
                 .body(format!(
                     "{}/{}_{} is {}",
                     complete_current_task.author,
@@ -833,7 +833,7 @@ async fn run_join_set_current(complete_current_task: DownloadTask) {
             let res = app
                 .notification()
                 .builder()
-                .title("Tauri")
+                .title("Comic-dl-tauri")
                 .body(format!(
                     "{} is {}",
                     complete_current_task.comic_name, status_for_db
