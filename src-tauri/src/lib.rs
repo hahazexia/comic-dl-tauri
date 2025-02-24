@@ -113,7 +113,7 @@ pub fn run() {
                 );
                 if window_label == "main" {
                     api.prevent_close();
-                    let _ = window.minimize();
+                    let _ = window.hide();
                 }
             }
             _ => {}
@@ -215,7 +215,7 @@ async fn download_single_image(
     progress: Arc<AtomicUsize>,
     total: i32,
 ) -> DownloadResult {
-    // info!("图片下载开始");
+    info!("img 1");
     let current_status = {
         let temp = if let Ok(tasks) = TASKS.try_read() {
             let target = tasks.iter().find(|x| x.id == id).unwrap();
@@ -233,6 +233,7 @@ async fn download_single_image(
             save_path,
         };
     }
+    info!("img 2");
     let mut count = 0;
     let mut res;
     let img_setting = {
@@ -243,7 +244,9 @@ async fn download_single_image(
         ]
     };
 
+    info!("img 3");
     loop {
+        info!("img 3.1");
         info!("download img loop count: {}", count);
         count += 1;
         let response_result = timeout(
@@ -252,16 +255,21 @@ async fn download_single_image(
         )
         .await;
 
+        info!("img 3.2");
         match response_result {
             Ok(Ok(response)) => {
+                info!("img 3.3");
                 if response.status().is_success() {
+                    info!("img 3.4");
                     let res_temp = response.bytes().await;
 
                     match res_temp {
                         Ok(bytes) => {
+                            info!("img 3.5");
                             res = bytes;
                         }
                         Err(_e) => {
+                            info!("img 3.6");
                             res = Bytes::from("");
                             error!(
                                 "download_single_image res id: {} save_path: {} error: {}",
@@ -269,8 +277,11 @@ async fn download_single_image(
                             );
                         }
                     }
+
+                    info!("img 3.7");
                     break;
                 } else {
+                    info!("img 3.8");
                     error!(
                         "download_single_image response status failed id: {} save_path: {}",
                         id, &save_path
@@ -279,6 +290,7 @@ async fn download_single_image(
                 }
             }
             Ok(Err(_e)) => {
+                info!("img 3.9");
                 error!(
                     "download_single_image id: {} save_path: {} err: {}",
                     id, &save_path, _e
@@ -286,6 +298,7 @@ async fn download_single_image(
                 res = Bytes::from("");
             }
             Err(e) => {
+                info!("img 3.10");
                 error!(
                     "download_single_image id: {} save_path: {} err: {}",
                     id, &save_path, e
@@ -294,10 +307,14 @@ async fn download_single_image(
             }
         }
 
+        info!("img 3.11");
+
         if count > img_setting[1] {
             break;
         }
     }
+
+    info!("img 4");
     info!(
         "download_single_image count: {} save_path: {}",
         count, &save_path
@@ -305,30 +322,37 @@ async fn download_single_image(
 
     let mut error_msg = String::from("");
     if res.is_empty() {
+        info!("img 5");
         info!("download img res empty save_path: {}", &save_path);
         error_msg = format!(
             "download img failed: id: {} save_path: {} group_index: {} index: {}",
             id, &save_path, group_index, index
         );
     } else {
+        info!("img 6");
         info!("download img handle img save_path: {}", &save_path);
         // 处理图片格式
         if let Ok(img) = load_from_memory(&res) {
+            info!("img 6.1");
             let jpg_bytes = img.to_rgb8();
             if let Ok(mut output_file) = File::create(PathBuf::from(&save_path)) {
+                info!("img 6.2");
                 if let Err(e) = jpg_bytes.write_to(&mut output_file, ImageFormat::Jpeg) {
+                    info!("img 6.3");
                     error_msg = format!(
                         "Failed to write image to file for id: {} save_path: {} group: {} index: {} e: {}",
                         id, &save_path, group_index, index, e
                     );
                 }
             } else {
+                info!("img 6.4");
                 error_msg = format!(
                     "Failed to create file for id: {} save_path: {} group: {} index: {}",
                     id, &save_path, group_index, index
                 );
             }
         } else {
+            info!("img 6.5");
             error_msg = format!(
                 "Failed to load image from memory for id: {} save_path: {} group: {} index: {}",
                 id, &save_path, group_index, index
@@ -337,10 +361,12 @@ async fn download_single_image(
 
         // 更新进度
         if error_msg.is_empty() {
+            info!("img 6.6");
             info!("download img emit progress save_path: {}", &save_path);
             progress.fetch_add(1, Ordering::Relaxed);
             let pro = progress.load(Ordering::Relaxed);
             if pro % 10 == 0 {
+                info!("img 6.7");
                 let app_lock = APP_HANDLE.read().unwrap().clone();
 
                 let progress_str = format!("{:.2}", ((pro as f32) / (total as f32) * 100.00));
@@ -353,7 +379,10 @@ async fn download_single_image(
                     };
                     temp
                 };
+
+                info!("img 6.8");
                 if let Some(app) = app_lock {
+                    info!("img 6.9");
                     let _ = &app
                         .emit(
                             "progress",
@@ -371,8 +400,12 @@ async fn download_single_image(
             }
         }
     }
+
+    info!("img 7");
     info!("download img drop permit save_path: {}", &save_path);
     drop(permit);
+
+    info!("img 8");
     DownloadResult {
         group_index,
         index,
@@ -467,12 +500,14 @@ fn start_waiting(app: &AppHandle) {
 }
 
 async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
+    info!("run 1");
     let all_count = complete_current_task.count;
     let cache_json_str = &complete_current_task.cache_json;
     let cache_json: Vec<CurrentElement> = serde_json::from_str(&cache_json_str).unwrap();
     let total = all_count;
     let progress = Arc::new(AtomicUsize::new(0));
 
+    info!("run 2");
     let comic_type = match complete_current_task.dl_type.as_str() {
         "juan" => String::from("单行本"),
         "hua" => String::from("单话"),
@@ -486,9 +521,12 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
         let res = SETTING.read().unwrap();
         PathBuf::from(res.download_dir.clone())
     };
+
+    info!("run 3");
     let mut all_results = Vec::new();
     let mut cache_json_sync = cache_json.clone();
     'outer: for (group_index, url_group) in cache_json.into_iter().enumerate() {
+        info!("run 4");
         let mut group_handles = Vec::<AbortHandle>::new();
         let mut join_set = JoinSet::new();
         let concurrent_count = {
@@ -499,6 +537,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
         let semaphore = Arc::new(Semaphore::new(concurrent_count));
 
         for (i, url) in url_group.imgs.into_iter().enumerate() {
+            info!("run 5");
             if url.done {
                 progress.fetch_add(1, Ordering::Relaxed);
                 continue;
@@ -539,8 +578,12 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
             ));
             group_handles.push(handle);
         }
+
+        info!("run 6");
         while let Some(res) = join_set.join_next().await {
+            info!("run 6.1");
             if let Ok(result) = res {
+                info!("run 6.2");
                 info!(
                     "run_join_set_juanhuafanwai join_set.join_next group_index: {} index: {} save_path: {} error_msg: {}",
                     result.group_index,
@@ -549,6 +592,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
                     result.error_msg,
                 );
                 if result.error_msg == "stopped" {
+                    info!("run 6.3");
                     for handle in group_handles.iter() {
                         handle.abort();
                     }
@@ -556,11 +600,14 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
                 }
                 all_results.push(result.clone());
                 if !&result.error_msg.is_empty() {
+                    info!("run 6.4");
                     error!("Task error: {}", &result.error_msg);
                 } else {
+                    info!("run 6.5");
                     cache_json_sync[result.group_index].imgs[result.index].done = true;
                 }
             } else {
+                info!("run 6.6");
                 error!("Task join error");
                 for handle in group_handles.iter() {
                     handle.abort();
@@ -568,8 +615,10 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
                 break 'outer;
             }
 
+            info!("run 6.7");
             let current_progress = progress.load(Ordering::Relaxed);
             if current_progress % 10 == 0 {
+                info!("run 6.8");
                 let progress_str = format!(
                     "{:.2}",
                     ((current_progress as f32) / (total as f32) * 100.00)
@@ -581,11 +630,13 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
                     current_progress as i32,
                     &serde_json::to_string_pretty(&cache_json_sync).unwrap(),
                 ) {
+                    info!("run 6.9");
                     error!("save progress to db failed: {}", e);
                 }
 
                 {
                     if let Ok(mut tasks) = TASKS.try_write() {
+                        info!("run 6.10");
                         if let Some(temp) =
                             tasks.iter_mut().find(|x| x.id == complete_current_task.id)
                         {
@@ -593,6 +644,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
                             temp.now_count = current_progress as i32;
                         }
                     } else {
+                        info!("run 6.11");
                         error!("Failed to sync TASKS");
                     }
                 }
@@ -600,6 +652,8 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
             info!("run_join_set_juanhuafanwai join_set.join_next finished");
         }
     }
+
+    info!("run 7");
     // 确保最后一次进度也保存到数据库
     let current_progress = progress.load(Ordering::Relaxed);
     let progress_str = format!(
@@ -615,12 +669,16 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
         }
     }
 
+    info!("run 8");
+
     let status_for_db;
     if !error_vec.is_empty() {
+        info!("run 9");
         error!("Final result error: {:?}", &error_vec);
 
         status_for_db = "failed";
     } else {
+        info!("run 10");
         status_for_db = if current_progress as i32 == total {
             "finished"
         } else {
@@ -629,6 +687,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
     }
     let app_lock = APP_HANDLE.read().unwrap().clone();
     if let Some(app) = app_lock {
+        info!("run 11");
         let _ = &app
             .emit(
                 "progress",
@@ -651,9 +710,11 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
         serde_json::to_string_pretty(&error_vec).unwrap().as_str(),
         status_for_db,
     ) {
+        info!("run 12");
         error!("save error_msg to db failed: {}", e);
     }
     {
+        info!("run 13");
         let mut tasks = TASKS.write().unwrap();
         if let Some(temp) = tasks.iter_mut().find(|x| x.id == complete_current_task.id) {
             temp.error_vec = serde_json::to_string_pretty(&error_vec).unwrap();
@@ -663,6 +724,7 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
         }
     }
     if status_for_db == "finished" || status_for_db == "failed" {
+        info!("run 14");
         let app_lock = APP_HANDLE.read().unwrap().clone();
         if let Some(app) = app_lock {
             let res = app
@@ -685,6 +747,8 @@ async fn run_join_set_juanhuafanwai(complete_current_task: DownloadTask) {
             }
         }
     }
+
+    info!("run 15");
     sort_tasks();
 }
 
