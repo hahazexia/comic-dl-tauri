@@ -678,7 +678,7 @@ onMounted(() => {
     .list-item {
       cursor: pointer;
       position: relative;
-      padding: 20px 10px;
+      padding: 20px 0px;
 
       &:hover {
         & ::before {
@@ -691,7 +691,7 @@ onMounted(() => {
         position: absolute;
         top: 0;
         left: 0;
-        width: calc(var(--progress) - 25px);
+        width: var(--progress);
         height: 100%;
         background-color: rgba(144, 176, 215, 0.022);
         z-index: -1;
@@ -777,7 +777,7 @@ onMounted(() => {
       }
 
       .progress {
-        width: 95%;
+        width: 100%;
         height: 3px;
         background-color: #E6E6E6;
         margin: 5px 0;
