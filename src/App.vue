@@ -417,7 +417,7 @@ onMounted(() => {
         <div class="list-tool-btn delete-all" title="delete all not downloading" @click="deleteAll"></div>
       </div>
       <div class="list-item" v-for="data in tasks_current" :key="data.id"
-        @contextmenu.prevent.capture="(e) => showContextMenu(e, data)">
+        @contextmenu.prevent.capture="(e) => showContextMenu(e, data)" :style="{ '--progress': `${data.progress}%` }">
         <div class="name" :class="{ 'downloading-name': data.status === 'downloading' }"
           v-text="`${data.comic_name}_${dl_type_map[data.dl_type]}`"
           :title="`${data.comic_name}_${dl_type_map[data.dl_type]}`"></div>
@@ -677,10 +677,24 @@ onMounted(() => {
 
     .list-item {
       cursor: pointer;
+      position: relative;
       padding: 20px 10px;
 
       &:hover {
-        background-color: #F5F5F5;
+        & ::before {
+          filter: hue-rotate(180deg) brightness(0.8) saturate(2);
+        }
+      }
+
+      ::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: calc(var(--progress) - 25px);
+        height: 100%;
+        background-color: rgba(144, 176, 215, 0.022);
+        z-index: -1;
       }
 
       .name {
@@ -796,6 +810,11 @@ onMounted(() => {
             width: 20px;
             height: 20px;
             cursor: pointer;
+
+            &:hover {
+              background-color: #F5F5F5;
+              filter: hue-rotate(180deg) brightness(0.8) saturate(2);
+            }
           }
 
           .error-info {
