@@ -113,7 +113,7 @@ pub fn run() {
                 );
                 if window_label == "main" {
                     api.prevent_close();
-                    let _ = window.hide();
+                    let _ = window.minimize();
                 }
             }
             _ => {}
