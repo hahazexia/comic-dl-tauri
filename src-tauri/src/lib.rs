@@ -406,10 +406,10 @@ fn sort_tasks() {
         }
 
         // 如果 status 相同，比较 author
-        let author_cmp = a.author.cmp(&b.author);
-        if author_cmp != std::cmp::Ordering::Equal {
-            return author_cmp;
-        }
+        // let author_cmp = a.author.cmp(&b.author);
+        // if author_cmp != std::cmp::Ordering::Equal {
+        //     return author_cmp;
+        // }
 
         // 如果 author 也相同，先按 now_count 降序排序
         let now_count_cmp = b.now_count.cmp(&a.now_count);
