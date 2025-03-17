@@ -412,10 +412,10 @@ fn sort_tasks() {
         // }
 
         // 如果 author 也相同，先按 now_count 降序排序
-        let now_count_cmp = b.now_count.cmp(&a.now_count);
-        if now_count_cmp != std::cmp::Ordering::Equal {
-            return now_count_cmp;
-        }
+        // let now_count_cmp = b.now_count.cmp(&a.now_count);
+        // if now_count_cmp != std::cmp::Ordering::Equal {
+        //     return now_count_cmp;
+        // }
 
         // 如果 now_count 也相同，再按 count 升序排序
         a.count.cmp(&b.count)

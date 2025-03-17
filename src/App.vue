@@ -152,9 +152,9 @@ function sortTasks() {
     // }
 
     // 如果 author 也相同，比较 now_count
-    if (b.now_count !== a.now_count) {
-      return b.now_count - a.now_count;
-    }
+    // if (b.now_count !== a.now_count) {
+    //   return b.now_count - a.now_count;
+    // }
 
     // 如果 now_count 相同，比较 count
     return a.count - b.count;
@@ -169,16 +169,16 @@ function sortTasks() {
     }
 
     // 如果 status 相同，比较 author
-    if (a.author < b.author) {
-      return -1;
-    } else if (a.author > b.author) {
-      return 1;
-    }
+    // if (a.author < b.author) {
+    //   return -1;
+    // } else if (a.author > b.author) {
+    //   return 1;
+    // }
 
     // 如果 author 也相同，比较 now_count
-    if (b.now_count !== a.now_count) {
-      return b.now_count - a.now_count;
-    }
+    // if (b.now_count !== a.now_count) {
+    //   return b.now_count - a.now_count;
+    // }
 
     // 如果 now_count 相同，比较 count
     return a.count - b.count;
